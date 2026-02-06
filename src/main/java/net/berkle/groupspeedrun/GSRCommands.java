@@ -14,6 +14,7 @@ import net.minecraft.server.command.CommandManager;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
+import net.minecraft.stat.Stats;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.GameMode;
@@ -21,6 +22,9 @@ import net.minecraft.world.gen.structure.Structure;
 import net.minecraft.world.gen.structure.StructureKeys;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.util.ArrayList;
+import java.util.List;
 
 import static net.minecraft.server.command.CommandManager.literal;
 import static net.minecraft.server.command.CommandManager.argument;
@@ -33,7 +37,9 @@ public class GSRCommands {
                 .requires(source -> CommandManager.ALWAYS_PASS_CHECK.allows(source.getPermissions()))
 
                 // --- STATUS COMMAND ---
+                // Requirements NONE
                 .then(literal("status")
+                        .requires(source -> CommandManager.ALWAYS_PASS_CHECK.allows(source.getPermissions()))
                         .executes(context -> {
                             var config = GSRMain.CONFIG;
                             String hud = switch (config.hudMode) {
@@ -51,7 +57,65 @@ public class GSRCommands {
                             return 1;
                         }))
 
+                // --- LIVE STATS DATA FRAME ---
+                // Requirements NONE
+                .then(literal("stats")
+                        .requires(source -> CommandManager.ALWAYS_PASS_CHECK.allows(source.getPermissions()))
+                        .executes(context -> {
+                            var config = GSRMain.CONFIG;
+                            if (config == null || config.startTime < 0) {
+                                context.getSource().sendError(Text.literal("No active run found."));
+                                return 0;
+                            }
+
+                            var pm = context.getSource().getServer().getPlayerManager();
+                            var players = pm.getPlayerList();
+
+                            // Table Header: TAG | PLAYER | TYPE | VALUE
+                            pm.broadcast(Text.literal("§8----------------------------------------------------------"), false);
+
+                            // Record to hold our schema definition
+                            record StatRow(String type, String label, java.util.function.ToDoubleFunction<ServerPlayerEntity> extractor) {}
+
+                            List<StatRow> schema = new ArrayList<>();
+                            schema.add(new StatRow("combat", "DragonWarrior", p -> (double) GSRStats.DRAGON_DAMAGE_MAP.getOrDefault(p.getUuid(), 0f)));
+                            schema.add(new StatRow("combat", "ADC", p -> (double) p.getStatHandler().getStat(Stats.CUSTOM.getOrCreateStat(Stats.DAMAGE_DEALT)) / 10.0));
+                            schema.add(new StatRow("combat", "Killer", p -> (double) p.getStatHandler().getStat(Stats.CUSTOM.getOrCreateStat(Stats.MOB_KILLS))));
+                            schema.add(new StatRow("utility", "BrewMaster", p -> (double) GSRStats.POTIONS_DRUNK.getOrDefault(p.getUuid(), 0)));
+                            schema.add(new StatRow("utility", "Builder", p -> (double) (GSRStats.BLOCKS_BROKEN.getOrDefault(p.getUuid(), 0) + GSRStats.BLOCKS_PLACED.getOrDefault(p.getUuid(), 0))));
+                            schema.add(new StatRow("support", "Healer", p -> (double) GSRStats.DAMAGE_HEALED.getOrDefault(p.getUuid(), 0f) / 2.0));
+                            schema.add(new StatRow("utility", "PogChamp", p -> (double) GSRStats.POG_CHAMP_COUNT.getOrDefault(p.getUuid(), 0)));
+                            schema.add(new StatRow("combat", "Defender", p -> (double) GSRStats.MAX_ARMOR_RATING.getOrDefault(p.getUuid(), 0)));
+                            schema.add(new StatRow("travel", "Sightseer", p -> (double) p.getStatHandler().getStat(Stats.CUSTOM.getOrCreateStat(Stats.WALK_ONE_CM)) / 100.0));
+                            schema.add(new StatRow("combat", "Tank", p -> (double) p.getStatHandler().getStat(Stats.CUSTOM.getOrCreateStat(Stats.DAMAGE_TAKEN)) / 10.0));
+
+                            for (StatRow stat : schema) {
+                                for (ServerPlayerEntity player : players) {
+                                    double val = stat.extractor.applyAsDouble(player);
+
+                                    if (val > 0) {
+                                        String rawName = player.getName().getString();
+                                        // Truncate/Pad Name to 10 chars
+                                        String playerName = rawName.length() > 10 ? rawName.substring(0, 10) : String.format("%-10s", rawName);
+
+                                        // Format the numeric value
+                                        String fVal = (val == (long) val) ? String.format("%d", (long) val) : String.format("%.1f", val);
+
+                                        // Row Construction: TAG (14) | PLAYER (10) | TYPE (12) | VALUE
+                                        String row = String.format("§b%-14s | §f%s | §e%-12s | §a%s",
+                                                stat.label, playerName, stat.type, fVal);
+
+                                        pm.broadcast(Text.literal(row), false);
+                                    }
+                                }
+                            }
+
+                            pm.broadcast(Text.literal("§8----------------------------------------------------------"), false);
+                            return 1;
+                        }))
+
                 // --- GAMEPLAY TOGGLES (Shared Health & Group Death) ---
+                // Requirements ADMIN
                 .then(literal("toggle_shared_hp")
                         .requires(source -> CommandManager.ADMINS_CHECK.allows(source.getPermissions()))
                         .executes(context -> {
@@ -62,6 +126,7 @@ public class GSRCommands {
                             return 1;
                         }))
 
+                // Requirements ADMIN
                 .then(literal("toggle_group_death")
                         .requires(source -> CommandManager.ADMINS_CHECK.allows(source.getPermissions()))
                         .executes(context -> {
@@ -73,6 +138,7 @@ public class GSRCommands {
                         }))
 
                 // --- SET MAX HEALTH (Defaults to 10 if no value provided) ---
+                // Requirements None
                 .then(literal("set_max_hp")
                         .requires(source -> CommandManager.ADMINS_CHECK.allows(source.getPermissions()))
                         // Case 1: /gsr set_max_hp -> Defaults to 10
@@ -91,6 +157,7 @@ public class GSRCommands {
                                 })))
 
                 // --- HUD CONFIGURATION ---
+                // Requirements None
                 .then(literal("toggle_hud")
                         .requires(source -> CommandManager.ALWAYS_PASS_CHECK.allows(source.getPermissions()))
                         .executes(context -> {
@@ -154,8 +221,13 @@ public class GSRCommands {
                 )
 
                 // --- STRUCTURE LOCATOR ---
+                // Requirement: Admins ALWAYS, or Everyone if the run is over (Failed or Won)
                 .then(literal("easy_locate")
-                        .requires(source -> CommandManager.ALWAYS_PASS_CHECK.allows(source.getPermissions()))
+                        .requires(source -> {
+                            var config = GSRMain.CONFIG;
+                            boolean isFinished = (config != null && (config.isFailed || config.wasVictorious));
+                            return CommandManager.ADMINS_CHECK.allows(source.getPermissions()) || isFinished;
+                        })
                         .then(literal("fortress").executes(context -> toggleLocate(context.getSource(), "Fortress")))
                         .then(literal("bastion").executes(context -> toggleLocate(context.getSource(), "Bastion")))
                         .then(literal("stronghold").executes(context -> toggleLocate(context.getSource(), "Stronghold")))
@@ -168,8 +240,13 @@ public class GSRCommands {
                 )
 
                 // --- ADMIN COMMANDS: RESET RUN ---
+                // Requirement: Admins ALWAYS, or Everyone if the run is over
                 .then(literal("reset")
-                        .requires(source -> CommandManager.ADMINS_CHECK.allows(source.getPermissions()))
+                        .requires(source -> {
+                            var config = GSRMain.CONFIG;
+                            boolean isFinished = (config != null && (config.isFailed || config.wasVictorious));
+                            return CommandManager.ADMINS_CHECK.allows(source.getPermissions()) || isFinished;
+                        })
                         .executes(context -> {
                             executeReset(context.getSource().getServer());
                             return 1;
@@ -312,7 +389,7 @@ public class GSRCommands {
             // 6. Teleport to Spawn
             p.teleport(overworld,
                     spawnPos.getX() + 0.5,
-                    (double) spawnPos.getY(),
+                     spawnPos.getY(),
                     spawnPos.getZ() + 0.5,
                     java.util.Collections.emptySet(),
                     0.0f,

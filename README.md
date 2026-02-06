@@ -20,19 +20,19 @@ All management is handled via the `/gsr` base command.
 
 | Command | Functionality | Default State | Permission |
 | :--- | :--- | :--- | :--- |
-| `status` | Displays active HUD modes and rule toggles. | N/A | Everyone |
-| `toggle_hud` | Cycles visibility: `Always` → `Tab-Only` → `Hidden`. | `1 (Tab-Only)` | Everyone |
-| `timer_hud_side` | Swaps the timer between the left and right screen edges. | `Right` | Everyone |
-| `locate_hud_height` | Swaps the tracker bar between top and bottom positions. | `Top` | Everyone |
-| `scale_timer_hud [x]` | Resizes the timer UI (0.3 to 3.5). | `1.0` | Admin |
-| `scale_locate_hud [x]` | Resizes the locator compass (0.3 to 3.5). | `0.95` | Admin |
-| `toggle_shared_hp` | Syncs all players to a single unified health pool. | `OFF` | Admin |
-| `toggle_group_death` | If ON, any single player death ends the run. | `ON` | Admin |
-| `set_max_hp [val]` | Sets the team's maximum heart capacity. | `10.0` | Admin |
-| `easy_locate <type>` | Pins a structure's location to the HUD compass. | `All OFF` | Everyone |
-| `easy_locate clear` | Removes all structure pins from the HUD. | N/A | Everyone |
-| `reset` | Full world wipe: Clears gear, stats, and resets time to 0. | N/A | Admin |
-
+| `status` | Displays active HUD modes, shared HP, and rule toggles. | N/A | Everyone |
+| `stats` | Broadcasts a Live Data Frame (Tag, Player, Type, Value). | N/A | Everyone |
+| `toggle_hud` | Cycles visibility: Always → Tab-Only → Hidden. | 1 (Tab-Only) | Everyone |
+| `timer_hud_side` | Swaps the timer between the left and right screen edges. | Right | Everyone |
+| `locate_hud_height` | Swaps the tracker bar between top and bottom positions. | Top | Everyone |
+| `scale_timer_hud [x]` | Resizes the timer UI (0.3 to 3.5). | 1.0 | Admin |
+| `scale_locate_hud [x]` | Resizes the locator compass (0.3 to 3.5). | 0.95 | Admin |
+| `toggle_shared_hp` | Syncs all players to a single unified health pool. | OFF | Admin |
+| `toggle_group_death` | If ON, any single player death ends the run. | ON | Admin |
+| `set_max_hp [val]` | Sets the team's maximum heart capacity. | 10.0 | Admin |
+| `easy_locate <type>` | Pins a structure's location to the HUD compass. | All OFF | Admin / Run Over |
+| `easy_locate clear` | Removes all structure pins from the HUD. | N/A | Admin / Run Over |
+| `reset` | Full world wipe: Clears gear, stats, and resets time to 0. | N/A | Admin / Run Over |
 ---
 
 ## ⏱ Milestone & Split Tracking
