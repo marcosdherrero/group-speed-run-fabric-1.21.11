@@ -100,14 +100,18 @@ public class GSREvents {
             // Wake up the HUD to show the final "Fail" time
             config.lastSplitTime = config.frozenTime;
 
-            server.getPlayerManager().broadcast(
-                    Text.literal("§c§l[GSR] " + deadPlayer.getName().getString() + " died! Run Failed."),
-                    false
+            // We call saveRun here to trigger the "Run Ruined" broadcast and save the JSON
+            GSRRunHistoryManager.saveRun(
+                    server,
+                    "FAILURE",
+                    deadPlayer.getName().getString(),
+                    deadPlayer.getDamageTracker().getDeathMessage().getString()
             );
 
             for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
                 p.changeGameMode(GameMode.SPECTATOR);
             }
+
             GSRMain.saveAndSync(server);
         }
     }
