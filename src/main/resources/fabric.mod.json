@@ -1,0 +1,37 @@
+{
+	"schemaVersion": 1,
+	"id": "groupspeedrun",
+	"version": "${version}",
+	"name": "Group Speed Run",
+	"description": "A Mod to connect players on a speed run",
+	"authors": [
+		"Berkle"
+	],
+	"contact": {
+		"homepage": "N/A",
+		"sources": "N/A"
+	},
+	"license": "MIT",
+	"icon": "assets/group-speed-run/icon.png",
+	"environment": "*",
+	"entrypoints": {
+		"main": [
+			"net.berkle.groupspeedrun.GSRMain"
+		],
+		"fabric-datagen": [
+			"net.berkle.groupspeedrun.GSRDataGenerator"
+		],
+		"client": [
+			"net.berkle.groupspeedrun.GSRClient"
+		]
+	},
+	"mixins": [
+		"groupspeedrunmixins.json"
+	],
+	"depends": {
+		"fabricloader": ">=0.15.0",
+		"minecraft": "~1.21",
+		"java": ">=21",
+		"fabric-api": "*"
+	}
+}

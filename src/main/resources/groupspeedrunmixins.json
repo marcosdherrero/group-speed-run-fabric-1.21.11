@@ -1,0 +1,20 @@
+{
+  "required": true,
+  "package": "net.berkle.groupspeedrun.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [
+    "trackers.GSRBlockItemTracker",
+    "trackers.GSRDragonDamageTracker",
+    "trackers.GSRDragonDeathTracker",
+    "trackers.GSRItemEntityTracker",
+    "trackers.GSRLivingEntityTracker",
+    "trackers.GSRPlayerTracker",
+    "trackers.GSRServerPlayerInterTracker",
+    "trackers.GSRSplitTracker",
+    "huds.GSRTimerHudMixin",
+    "huds.GSRLocateHudMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
