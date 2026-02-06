@@ -129,10 +129,10 @@ public class GSREvents {
                 config.totalPausedTicks = 0;
                 config.frozenTime = 0;
 
-                /**
-                 * TRIGGER HUD POP-UP:
-                 * Setting lastSplitTime triggers the 10-second fade-in logic
-                 * in GSRTimerHudState, showing the timer as soon as movement starts.
+                 /*
+                  TRIGGER HUD POP-UP:
+                  Setting lastSplitTime triggers the 10-second fade-in logic
+                  in GSRTimerHudState, showing the timer as soon as movement starts.
                  */
                 config.lastSplitTime = currentTime;
 
@@ -158,7 +158,7 @@ public class GSREvents {
                 .filter(p -> p.isAlive() && !p.isSpectator() && !p.isCreative()).toList();
 
         if (players.isEmpty()) { lastGroupHealth = -1f; return; }
-        if (lastGroupHealth <= 0) lastGroupHealth = players.get(0).getHealth();
+        if (lastGroupHealth <= 0) lastGroupHealth = players.getFirst().getHealth();
 
         float min = Float.MAX_VALUE;
         float max = -1f;
@@ -169,7 +169,7 @@ public class GSREvents {
         }
 
         // If someone took damage, drop everyone to that level. If someone healed, raise everyone.
-        float target = (min < lastGroupHealth) ? min : (max > lastGroupHealth ? max : lastGroupHealth);
+        float target = (min < lastGroupHealth) ? min : (Math.max(max, lastGroupHealth));
 
         if (Math.abs(target - lastGroupHealth) > 0.01f) {
             for (ServerPlayerEntity p : players) p.setHealth(target);
