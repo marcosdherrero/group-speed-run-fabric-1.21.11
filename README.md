@@ -6,35 +6,37 @@ A high-performance, team-oriented management suite for Minecraft speedruns. **Gr
 
 ## 🚀 Key Features
 
-* **World-Aware Logic:** Unlike external timers, GSR is embedded in the world save. It detects "Fresh" vs "Resume" states to manage statistics automatically.
+* **World-Aware Logic:** Embedded in the world save; detects "Fresh" vs "Resume" states to manage statistics automatically.
 * **Integrated Auto-Splitter:** Automatically records times for the Nether, Bastion, Fortress, The End, and the Dragon kill.
-* **Smart HUD Visibility:** The HUD features a 10-second "Split Pop-up," a smooth Tab-key peek, and an end-of-run permanent display.
+* **Smart HUD Visibility:** Features a 10-second "Split Pop-up," a smooth Tab-key peek, and an end-of-run permanent display.
 * **Dynamic Compass:** A horizontal tracking bar that scales icons based on proximity and maps them to your field of view.
 * **Shared Survival:** Optional **Shared Health** (unified heart bar) and **Group Death** (one die, all die) mechanics.
-* **Post-Run "Roast" System:** Detailed JSON reports and chat broadcasts that award "Dragon Warrior" to winners or "The Disgrace" to losers.
+* **Post-Run Analytics:** Detailed JSON reports and chat broadcasts that award titles to winners or call out the "Disgrace" in failures.
 
 ---
 
-## ⌨️ Command Reference
+## ⌨️ Command & Configuration Reference
 All management is handled via the `/gsr` base command.
 
-| Command | Functionality | Permission |
-| :--- | :--- | :--- |
-| `status` | Shows HUD mode, Group Death/Shared HP status, and Max Hearts. | Everyone |
-| `toggle_hud` | Cycles HUD: `Always Visible` → `Tab Only` → `Hidden`. | Everyone |
-| `toggle_shared_hp` | Enables/Disables unified health pool for the team. | Admin |
-| `toggle_group_death` | If ON, one player dying fails the entire run. | Admin |
-| `set_max_hp [val]` | Sets group max hearts (0.5 - 100). Default is 10. | Admin |
-| `toggle_hud timer_hud_side` | Swaps timer position between **LEFT** and **RIGHT**. | Everyone |
-| `scale_timer_hud [x]` | Resizes timer (0.3 - 3.5). No value resets to 1.0. | Admin |
-| `easy_locate <type>` | Toggles tracker for `fortress`, `bastion`, `stronghold`, or `ship`. | Everyone |
-| `easy_locate clear` | Clears all active structure trackers. | Everyone |
-| `reset` | **Master Reset:** Clears inv/advancements/stats and teleports to spawn. | Admin |
+| Command | Functionality | Default State | Permission |
+| :--- | :--- | :--- | :--- |
+| `status` | Displays active HUD modes and rule toggles. | N/A | Everyone |
+| `toggle_hud` | Cycles visibility: `Always` → `Tab-Only` → `Hidden`. | `1 (Tab-Only)` | Everyone |
+| `timer_hud_side` | Swaps the timer between the left and right screen edges. | `Right` | Everyone |
+| `locate_hud_height` | Swaps the tracker bar between top and bottom positions. | `Top` | Everyone |
+| `scale_timer_hud [x]` | Resizes the timer UI (0.3 to 3.5). | `1.0` | Admin |
+| `scale_locate_hud [x]` | Resizes the locator compass (0.3 to 3.5). | `0.95` | Admin |
+| `toggle_shared_hp` | Syncs all players to a single unified health pool. | `OFF` | Admin |
+| `toggle_group_death` | If ON, any single player death ends the run. | `ON` | Admin |
+| `set_max_hp [val]` | Sets the team's maximum heart capacity. | `10.0` | Admin |
+| `easy_locate <type>` | Pins a structure's location to the HUD compass. | `All OFF` | Everyone |
+| `easy_locate clear` | Removes all structure pins from the HUD. | N/A | Everyone |
+| `reset` | Full world wipe: Clears gear, stats, and resets time to 0. | N/A | Admin |
 
 ---
 
 ## ⏱ Milestone & Split Tracking
-The `GSRSplitManager` monitors your progress in real-time.
+The `GSRSplitManager` monitors progress and triggers HUD animations upon completion.
 
 | Milestone | Trigger Condition | UI Icon |
 | :--- | :--- | :--- |
@@ -46,34 +48,41 @@ The `GSRSplitManager` monitors your progress in real-time.
 
 ---
 
-## 📊 Performance Statistics (Awards)
-At the end of every run, players are evaluated based on their contribution.
+## 📊 Comprehensive Award & Stat Tracking (Alphabetical)
+Every run generates a post-game report. The mod uses a "Unique Pass" system to ensure as many players as possible receive recognition.
 
-| Stat Tag | Award Label | Data Tracked |
-| :--- | :--- | :--- |
-| `dragon_warrior` | **Dragon Warrior** | Most damage dealt to the Ender Dragon. |
-| `pog_champ` | **Pog Champ** | Most Blaze Rods collected. |
-| `adc` | **ADC** | Highest overall mob damage dealt. |
-| `tank` | **Tank** | Highest total damage taken. |
-| `shuffler` | **Professional Shuffler** | Most inventory/container opens (Roast). |
-| `coward` | **Coward** | Least damage taken in a failed run (Roast). |
+| Stat Tag | Award Label | Detail of Tracking | Context |
+| :--- | :--- | :--- | :--- |
+| `adc` | **ADC** | Total damage dealt to all entities. | **Both** |
+| `brew_master` | **Brew Master** | Number of potions consumed. | **Both** |
+| `builder` | **Builder** | Sum of blocks broken and placed. | **Both** |
+| `coward` | **Coward** | Player who took the **least** damage. | **Failure** |
+| `defender` | **Defender** | Highest armor rating reached. | **Both** |
+| `dragon_warrior` | **Dragon Warrior** | Damage dealt to the Ender Dragon. | **Victory** |
+| `good_for_nothing` | **Good for Nothing** | Player with fewest advancements. | **Failure** |
+| `healer` | **Healer** | Total health points regenerated. | **Both** |
+| `killer` | **Serial Killer** | Total number of mobs killed. | **Both** |
+| `pog_champ` | **Pog Champ** | Number of Blaze Rods collected. | **Both** |
+| `shuffler` | **Shuffler** | Total inventory/container opens. | **Failure** |
+| `sightseer` | **Sightseer** | Total distance traveled (Blocks). | **Both** |
+| `tank` | **Tank** | Total damage taken from all sources. | **Both** |
+| `weakling` | **Weakling** | Player who dealt the **least** damage. | **Failure** |
 
 ---
 
 ## 📂 File Structure & JSON Data
-The mod ensures data integrity through persistent JSON files.
 
 ### 1. World Configuration (`./world/groupspeedrun.json`)
-This file tracks the current state of the world, including all split times (in ticks), active structure coordinates, and gameplay toggles. It is synchronized to all clients via the **GSRNetworking** system.
+Tracks the current state of the world, including split times, structure coordinates, and gameplay toggles. Synchronized to all clients via **GSRNetworking**. Visual preferences (scaling, colors) are preserved during resets, while run-data is cleared.
 
 ### 2. Run History (`./config/groupspeedrun/history/`)
 Saves a permanent record of every attempt.
 * **Naming:** `{W/L}_{Date}_{Player}_{World}.json`
-* **Contents:** Final time (ticks/formatted), Victory/Failure status, and the raw numerical values for every award.
+* **Contents:** Final time (ticks/formatted), Victory/Failure status, and all awarded stats.
 
 ---
 
 ## 🛠 Installation
-1. Install **Fabric Loader** for **1.21.11**.
-2. Place the `groupspeedrun.jar` and **Fabric API** into your `mods` folder.
-3. Launch the server. The mod will generate necessary folders in the `config` and `world` directories.
+1.  Install **Fabric Loader** for **1.21.11**.
+2.  Place the `groupspeedrun.jar` and **Fabric API** into your `mods` folder.
+3.  Launch the server. Folders generate in `config` and `world` on startup.
