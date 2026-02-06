@@ -113,33 +113,24 @@ public class GSRLocateHudMixin {
         var config = GSRMain.CONFIG;
         float hudScale = config.locateHudScale;
 
-        // Calculate distance and angle relative to player
+        // 1. Position Math (Clamped to bar interior)
         double deltaX = targetX - client.player.getX();
         double deltaZ = targetZ - client.player.getZ();
         double distance = Math.sqrt(deltaX * deltaX + deltaZ * deltaZ);
 
-        // Normalize angle so 0 is straight ahead
         float angleToTarget = (float) Math.toDegrees(Math.atan2(deltaZ, deltaX)) - 90.0f;
         float relativeAngle = MathHelper.wrapDegrees(angleToTarget - client.player.getYaw());
 
-        // Grow/Shrink the icon based on how close the player is
-        float distFactor = MathHelper.clamp((float) (1.0 - (distance / (double)config.maxScaleDistance)), 0.0f, 1.0f);
-        float iconScale = MathHelper.lerp(distFactor, GSRConfig.MIN_LOCATE_HUD_SCALE, GSRConfig.MAX_LOCATE_HUD_SCALE) * hudScale;
-
-        // Map the -90 to 90 degree field of view to the horizontal bar width
-        float xOffset = (relativeAngle * ((config.barWidth / 2.0f) / 90.0f)) * hudScale;
-
-        // Clamp the icon to the edges if the target is behind the player
-        if (Math.abs(relativeAngle) > 90.0f) {
-            xOffset = (relativeAngle > 0) ? (config.barWidth / 2.0f * hudScale) : (-config.barWidth / 2.0f * hudScale);
-        }
+        float frameHalfWidth = 9.0f * hudScale;
+        float maxOffset = ((config.barWidth / 2.0f) * hudScale) - frameHalfWidth;
+        float xOffset = MathHelper.clamp((relativeAngle * (maxOffset / 90.0f)), -maxOffset, maxOffset);
 
         float iconX = (float) centerX + xOffset;
         float iconY = (float) y + (8.5f * hudScale);
 
-        // --- Render Background Frame ---
+        // --- Render Background Frame (Fixed Size) ---
         context.getMatrices().pushMatrix();
-        context.getMatrices().translate(iconX, iconY); // Z=0 for HUD
+        context.getMatrices().translate(iconX, iconY);
         context.getMatrices().scale(hudScale, hudScale);
 
         int themed = GSRColorHelper.applyAlpha(themeColor, alpha);
@@ -149,11 +140,24 @@ public class GSRLocateHudMixin {
         context.fill(-8, -8, 8, 8, bg);
         context.getMatrices().popMatrix();
 
-        // --- Render Minecraft Item Icon ---
+        // --- Render Scaled Item (Proportional to Frame) ---
+        // distFactor: 0.0 at max distance, 1.0 at 0 blocks
+        float distFactor = MathHelper.clamp((float) (1.0 - (distance / (double)config.maxScaleDistance)), 0.0f, 1.0f);
+
+        /**
+         * Scaling Logic:
+         * Min scale: 0.5f (Small icon inside the box)
+         * Max scale: 1.0f (Standard size, fits perfectly in the 18x18 frame)
+         * We multiply by hudScale at the end to respect the user's global settings.
+         */
+        float minInternalScale = 0.5f;
+        float maxInternalScale = 1.0f;
+        float finalIconScale = MathHelper.lerp(distFactor, minInternalScale, maxInternalScale) * hudScale;
+
         context.getMatrices().pushMatrix();
         context.getMatrices().translate(iconX, iconY);
-        context.getMatrices().scale(iconScale, iconScale);
-        context.getMatrices().translate(-8.0f, -8.0f); // Center the 16x16 icon
+        context.getMatrices().scale(finalIconScale, finalIconScale);
+        context.getMatrices().translate(-8.0f, -8.0f); // Centers the 16x16 item
 
         context.drawItem(stack, 0, 0);
         context.getMatrices().popMatrix();
