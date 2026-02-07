@@ -38,3 +38,11 @@ hs_err_*.log
 replay_*.log
 *.hprof
 *.jfr
+
+# --- Group Speedrun Specific ---
+# Prevents personal run history from being uploaded
+config/groupspeedrun/history/
+
+# Prevents local testing world stats from being uploaded
+world/groupspeedrun.json
+world/gsr_stats.json
