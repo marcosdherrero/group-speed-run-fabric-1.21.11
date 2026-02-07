@@ -15,6 +15,24 @@ A high-performance management suite for Minecraft speedruns. **Group Speedrun (G
 
 ---
 
+## 🛠 Installation & Compatibility
+
+### Requirements
+* **Minecraft Version:** 1.21.1
+* **Fabric Loader:** [Latest Version](https://fabricmc.net/use/installer/)
+* **Dependencies:** [Fabric API](https://www.curseforge.com/minecraft/mc-mods/fabric-api)
+
+### Setup Instructions
+1. **Client & Server:** Place `groupspeedrun.jar` and `fabric-api.jar` into your `mods` folder.
+2. **Multiplayer (Essential/LAN):** For the HUD and Shared Health to function, **all players** must have the mod installed locally.
+3. **Verify:** Join the world and type `/gsr status` to ensure the mod is active.
+
+### Multiplayer Sync Logic
+GSR utilizes a **Single Source of Truth** model. Timers and health are calculated on the Host/Server and pushed to all clients via custom networking. This ensures that every player sees the exact same split times and HUD animations at the same millisecond.
+
+
+---
+
 ## ⌨️ Command Reference
 All management is handled via the `/gsr` base command.
 
@@ -70,25 +88,6 @@ Saves real-time data using `ConcurrentHashMap` to ensure that damage, blocks, an
 Saves a permanent record of every attempt.
 * **Naming:** `[RESULT]_[Date]_[PrimaryPlayer]_[World].json`
 * **Contents:** Stores `final_time_ticks`, formatted time, and a full `awards` object containing all winner names and their numeric values.
-
----
-
-## 🛠 Installation
-
-### Requirements
-* **Minecraft Version:** 1.21.1
-* **Fabric Loader:** [Latest Version](https://fabricmc.net/use/installer/)
-* **Dependencies:** [Fabric API](https://www.curseforge.com/minecraft/mc-mods/fabric-api)
-
-### Setup Instructions
-1. **Client Side:**
-    - Install the Fabric Loader for 1.21.1.
-    - Place the `groupspeedrun.jar` and `fabric-api.jar` into your `.minecraft/mods` folder.
-2. **Server Side:**
-    - Place the `groupspeedrun.jar` and `fabric-api.jar` into the server's `mods` folder.
-    - Restart the server to generate the necessary configuration files.
-3. **Verify:**
-    - Join the server and type `/gsr status` to ensure the mod is active.
 
 ---
 
