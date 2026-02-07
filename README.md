@@ -48,7 +48,7 @@ GSR uses a **"Unique Pass"** system: it recognizes as many individual players as
 | `tank` | **Tank** | Total damage taken (Points / 10). | **Both** |
 | `defender` | **Defender** | Highest armor rating reached. | **Both** |
 | `sightseer` | **Sightseer** | Total distance traveled (CM / 100). | **Both** |
-| `pog_champ` | **Pog Champ** | High-value actions (e.g., Blaze Rods). | **Both** |
+| `pog_champ` | **Pog Champ** | High-value actions (e.g., Blaze Rods collected). | **Both** |
 | `builder` | **Builder** | Sum of blocks broken and placed. | **Both** |
 | `brew_master` | **Brew Master** | Number of potions consumed. | **Both** |
 | `coward` | **Coward** | Player who took the **least** damage. | **Failure** |
@@ -73,7 +73,26 @@ Saves a permanent record of every attempt.
 
 ---
 
-## 🛠 Technical Details
+## 🛠 Installation
+
+### Requirements
+* **Minecraft Version:** 1.21.1
+* **Fabric Loader:** [Latest Version](https://fabricmc.net/use/installer/)
+* **Dependencies:** [Fabric API](https://www.curseforge.com/minecraft/mc-mods/fabric-api)
+
+### Setup Instructions
+1. **Client Side:**
+    - Install the Fabric Loader for 1.21.1.
+    - Place the `groupspeedrun.jar` and `fabric-api.jar` into your `.minecraft/mods` folder.
+2. **Server Side:**
+    - Place the `groupspeedrun.jar` and `fabric-api.jar` into the server's `mods` folder.
+    - Restart the server to generate the necessary configuration files.
+3. **Verify:**
+    - Join the server and type `/gsr status` to ensure the mod is active.
+
+---
+
+## ⚙️ Technical Details
 * **Auto-Start:** Timer triggers the moment the first player movement is detected after a `/gsr reset`.
 * **Networking:** Synchronized via `GSRConfigPayload` and scheduled on the main client thread to prevent race conditions during HUD rendering.
 * **Reset Logic:** Performs a total world cleanup—clearing inventories, resetting hunger/fire, revoking all advancements, and resetting player statistics.
