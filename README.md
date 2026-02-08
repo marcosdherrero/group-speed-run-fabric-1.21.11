@@ -67,7 +67,7 @@ GSR looks at how everyone played and hands out "Awards" at the end. Our **Unique
 | `pog_champ` | **§e🔥 Pog Champ** | Most high-value actions (Blaze Rods). | Both |
 | `builder` | **§2🔨 Builder** | Most blocks placed and broken combined. | Both |
 | `sightseer` | **§f👣 Sightseer** | Longest distance traveled (Blocks). | Both |
-| `shuffler` | **§3🗃 Shuffler** | Most time spent in inventories/chests. | Failure |
+| `shuffler` | **§3🗃 Shuffler** | Most chests opened. | Failure |
 | `coward` | **§e🏃 Coward** | Took the least damage (Failure Roasting). | Failure |
 | `weakling` | **§f🍼 Weakling** | Dealt the least damage (Failure Roasting). | Failure |
 | `good_for_nothing` | **§8⚖ Carried** | Player with the fewest advancements. | Failure |
