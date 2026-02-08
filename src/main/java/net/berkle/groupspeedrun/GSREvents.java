@@ -14,57 +14,46 @@ import net.minecraft.server.world.ServerWorld;
 import net.minecraft.sound.SoundEvents;
 import net.minecraft.text.Text;
 import net.minecraft.world.GameMode;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.util.List;
 
 /**
  * Main event handler for the Group Speedrun mod.
- * Uses System.currentTimeMillis() for real-world time accuracy.
  */
 public class GSREvents {
-    // Tracks the group health from the previous tick to calculate delta changes
+    // FIX: Added the missing LOGGER variable
+    private static final Logger LOGGER = LoggerFactory.getLogger("GSR-Events");
+
     private static float lastGroupHealth = -1f;
 
-    /**
-     * Core tick logic. Called 20 times per second.
-     */
     public static void onTick(MinecraftServer server) {
         var config = GSRMain.CONFIG;
         if (config == null) return;
 
-        /*
-         * 1. AUTO-START DETECTION
-         * Only runs if startTime is -1 (meaning no run is currently active OR resumed).
-         */
+        // 1. AUTO-START DETECTION
         if (config.startTime == -1 && !server.getPlayerManager().getPlayerList().isEmpty()) {
             handleAutoStart(server, config);
         }
 
-        /*
-         * 2. PAUSE STATE PROTECTION
-         * If the timer is frozen, we maintain player vitals but skip game logic.
-         */
+        // 2. PAUSE STATE PROTECTION
         if (config.isTimerFrozen) {
             handlePauseMaintenance(server);
             return;
         }
 
-        /*
-         * 3. SHARED HEALTH ENGINE
-         */
+        // 3. SHARED HEALTH ENGINE
         if (config.sharedHealthEnabled && !config.isFailed && !config.isVictorious) {
             handleSharedHealth(server);
         }
 
-        /*
-         * 4. PERIODIC SPLIT CHECKS
-         */
+        // 4. PERIODIC SPLIT CHECKS
         if (server.getTicks() % 10 == 0 && config.startTime > 0) {
             GSRSplitManager.checkSplits(server);
         }
 
-        /*
-         * 5. VICTORY CELEBRATIONS
-         */
+        // 5. VICTORY CELEBRATIONS
         if (config.isVictorious && config.victoryTimer > 0) {
             if (config.victoryTimer % 10 == 0) {
                 for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) spawnFirework(p);
@@ -73,24 +62,12 @@ public class GSREvents {
         }
     }
 
-    /**
-     * Converts the current real-world duration into game ticks.
-     * Required by GSRRunHistoryManager and GSRSplitManager.
-     * * @param server The MinecraftServer instance (kept for compatibility)
-     * @return Total active run time in ticks (1 tick = 50ms).
-     */
     public static long getRunTicks(MinecraftServer server) {
         var config = GSRMain.CONFIG;
         if (config == null || config.startTime < 0) return 0;
-
-        // getElapsedTime() correctly handles active vs paused states
-        long elapsedMs = config.getElapsedTime();
-        return elapsedMs / 50;
+        return config.getElapsedTime() / 50;
     }
 
-    /**
-     * Records exactly how much time has passed to 'frozenTime' and pauses logic.
-     */
     public static void pauseRun(MinecraftServer server) {
         var config = GSRMain.CONFIG;
         if (config != null && !config.isTimerFrozen && config.startTime > 0) {
@@ -105,16 +82,11 @@ public class GSREvents {
         }
     }
 
-    /**
-     * Resumes a paused run and triggers a HUD pop-up.
-     */
     public static void resumeRun(MinecraftServer server) {
         var config = GSRMain.CONFIG;
         if (config != null && config.isTimerFrozen) {
             config.isTimerFrozen = false;
             config.startTime = System.currentTimeMillis() - config.frozenTime;
-
-            // Trigger HUD pop-up on resume
             config.lastSplitTime = server.getOverworld().getTime();
 
             server.getPlayerManager().broadcast(Text.literal("§6[GSR] §aTimer Resumed!"), false);
@@ -125,9 +97,6 @@ public class GSREvents {
         }
     }
 
-    /**
-     * Keeps players from starving or dying while the run is paused.
-     */
     private static void handlePauseMaintenance(MinecraftServer server) {
         for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
             if (player.isSpectator() || player.isCreative()) continue;
@@ -136,37 +105,58 @@ public class GSREvents {
         }
     }
 
-    /**
-     * Handles Group Death logic.
-     */
+    private static void handleAutoStart(MinecraftServer server, GSRConfigWorld config) {
+        for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
+            // Check if player moved or acted
+            if (player.squaredDistanceTo(player.lastRenderX, player.lastRenderY, player.lastRenderZ) > 0.0001
+                    || player.isUsingItem() || player.handSwinging) {
+
+                config.startTime = System.currentTimeMillis();
+                config.isTimerFrozen = false;
+                config.frozenTime = 0;
+                config.lastSplitTime = server.getOverworld().getTime();
+
+                GSRMain.saveAndSync(server);
+                for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
+                    p.playSound(SoundEvents.ENTITY_PLAYER_LEVELUP, 1.0f, 1.0f);
+                }
+                server.getPlayerManager().broadcast(Text.literal("§6§l[GSR] §rTimer Started! Good luck."), false);
+                break;
+            }
+        }
+    }
+
     public static void handlePlayerDeath(ServerPlayerEntity deadPlayer, MinecraftServer server) {
         var config = GSRMain.CONFIG;
+        if (config == null || config.startTime <= 0) return;
 
-        // 1. STAT TRACKING
-        // We track the death even if Group Death is disabled, as long as a run is active.
-        if (config != null && config.startTime > 0) {
-            // This ensures the death is recorded in the JSON for the post-run summary
-            GSRStats.addInt(GSRStats.BLOCKS_BROKEN, deadPlayer.getUuid(), 0); // Example of calling addInt
-            // Assuming you add a DEATHS map to GSRStats:
-            // GSRStats.addInt(GSRStats.TOTAL_DEATHS, deadPlayer.getUuid(), 1);
+        // 1. Check exclusion list
+        if (config.excludedPlayers.contains(deadPlayer.getUuid())) {
+            LOGGER.info("GSR: {} died but is excluded from group death.", deadPlayer.getName().getString());
+            return;
         }
 
-        // 2. FAIL CONDITION (Group Death Logic)
-        if (config != null && config.startTime > 0 && config.groupDeathEnabled && !config.isFailed && !config.isVictorious) {
+        // 2. Trigger Group Death
+        if (config.groupDeathEnabled && !config.isFailed && !config.isVictorious) {
             config.isFailed = true;
             config.isTimerFrozen = true;
             config.frozenTime = System.currentTimeMillis() - config.startTime;
-
-            // Trigger HUD pop-up for the final time showing the death time
             config.lastSplitTime = server.getOverworld().getTime();
 
-            GSRRunHistoryManager.saveRun(
-                    server,
-                    "FAILURE",
-                    deadPlayer.getName().getString(),
-                    deadPlayer.getDamageTracker().getDeathMessage().getString()
+            // CAPTURE: The specific death message for this player
+            Text deathMsg = deadPlayer.getDamageTracker().getDeathMessage();
+            String deathString = deathMsg.getString();
+
+            // LOG: Save history with the actual player name and cause
+            GSRRunHistoryManager.saveRun(server, "FAILURE", deadPlayer.getName().getString(), deathString);
+
+            // BROADCAST: Send the specific death message to everyone in red
+            server.getPlayerManager().broadcast(
+                    Text.literal("§6[GSR] §cGroup Failed! ").append(deathMsg),
+                    false
             );
 
+            // SYNC: Put everyone in spectator and play thunder sound
             for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
                 p.changeGameMode(GameMode.SPECTATOR);
                 p.playSound(SoundEvents.ENTITY_LIGHTNING_BOLT_THUNDER, 1.0f, 1.0f);
@@ -176,66 +166,54 @@ public class GSREvents {
         }
     }
 
-    /**
-     * Starts the run when player movement is detected.
-     */
-    private static void handleAutoStart(MinecraftServer server, GSRConfigWorld config) {
-        for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
-            // Check for movement, item use, or swinging hands
-            if (player.squaredDistanceTo(player.lastRenderX, player.lastRenderY, player.lastRenderZ) > 0.0001
-                    || player.isUsingItem() || player.handSwinging) {
-
-                config.startTime = System.currentTimeMillis();
-                config.isTimerFrozen = false;
-                config.frozenTime = 0;
-
-                // Trigger HUD pop-up
-                config.lastSplitTime = server.getOverworld().getTime();
-
-                GSRMain.saveAndSync(server);
-
-                for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
-                    p.playSound(SoundEvents.ENTITY_PLAYER_LEVELUP, 1.0f, 1.0f);
-                }
-
-                server.getPlayerManager().broadcast(Text.literal("§6§l[GSR] §rTimer Started! Good luck."), false);
-                break;
-            }
-        }
-    }
-
-    /**
-     * Shared Health Engine.
-     */
     private static void handleSharedHealth(MinecraftServer server) {
-        List<ServerPlayerEntity> players = server.getPlayerManager().getPlayerList().stream()
-                .filter(p -> p.isAlive() && !p.isSpectator() && !p.isCreative()).toList();
+        var config = GSRMain.CONFIG;
+        List<ServerPlayerEntity> participants = server.getPlayerManager().getPlayerList().stream()
+                .filter(p -> p.isAlive() && !p.isSpectator() && !p.isCreative())
+                .filter(p -> !config.excludedPlayers.contains(p.getUuid()))
+                .toList();
 
-        if (players.isEmpty()) {
+        if (participants.isEmpty()) {
             lastGroupHealth = -1f;
             return;
         }
 
-        if (lastGroupHealth <= 0) lastGroupHealth = players.get(0).getHealth();
+        if (lastGroupHealth <= 0) lastGroupHealth = participants.get(0).getHealth();
 
         float min = Float.MAX_VALUE;
-        float max = -1f;
+        ServerPlayerEntity damagedPlayer = null;
 
-        for (ServerPlayerEntity p : players) {
-            float h = p.getHealth();
-            if (h < min) min = h;
-            if (h > max) max = h;
+        for (ServerPlayerEntity p : participants) {
+            if (p.getHealth() < min) {
+                min = p.getHealth();
+                damagedPlayer = p;
+            }
         }
 
-        float target = (min < lastGroupHealth) ? min : (Math.max(max, lastGroupHealth));
+        if (min < lastGroupHealth - 0.01f) {
+            float heartsLost = (lastGroupHealth - min) / 2.0f;
+            String name = (damagedPlayer != null) ? damagedPlayer.getName().getString() : "Someone";
+            Text msg = Text.literal("§6[GSR] §f" + name + " §ctook " + String.format("%.1f", heartsLost) + " damage!");
 
-        if (Math.abs(target - lastGroupHealth) > 0.01f) {
-            for (ServerPlayerEntity p : players) p.setHealth(target);
-            lastGroupHealth = target;
+            for (ServerPlayerEntity p : participants) {
+                p.setHealth(min);
+                p.playSound(SoundEvents.ENTITY_PLAYER_HURT, 1.0f, 1.0f);
+                p.sendMessage(msg, true);
+            }
+            lastGroupHealth = min;
+        } else {
+            float max = -1f;
+            for (ServerPlayerEntity p : participants) if (p.getHealth() > max) max = p.getHealth();
+
+            if (max > lastGroupHealth + 0.01f) {
+                for (ServerPlayerEntity p : participants) p.setHealth(max);
+                lastGroupHealth = max;
+            }
         }
     }
 
     public static void applyMaxHealth(ServerPlayerEntity player, float hearts) {
+        // Updated to use RegistryEntry logic for EntityAttributes in 1.21
         EntityAttributeInstance attr = player.getAttributeInstance(EntityAttributes.MAX_HEALTH);
         if (attr != null) {
             attr.setBaseValue(hearts * 2.0);
@@ -244,9 +222,13 @@ public class GSREvents {
     }
 
     public static void updateMaxHearts(MinecraftServer server, float hearts) {
-        GSRMain.CONFIG.maxHearts = hearts;
-        for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) applyMaxHealth(p, hearts);
-        GSRMain.saveAndSync(server);
+        if (GSRMain.CONFIG != null) {
+            GSRMain.CONFIG.maxHearts = hearts;
+            for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
+                applyMaxHealth(p, hearts);
+            }
+            GSRMain.saveAndSync(server);
+        }
     }
 
     private static void spawnFirework(ServerPlayerEntity player) {

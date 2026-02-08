@@ -4,11 +4,14 @@ import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.FloatArgumentType;
 import com.mojang.brigadier.tree.LiteralCommandNode;
 import com.mojang.datafixers.util.Pair;
+import net.berkle.groupspeedrun.config.GSRConfigPayload;
 import net.berkle.groupspeedrun.config.GSRConfigPlayer;
 import net.berkle.groupspeedrun.managers.GSRBroadcastManager;
-import net.berkle.groupspeedrun.managers.GSRSplitManager; // Added import
+import net.berkle.groupspeedrun.managers.GSRSplitManager;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.advancement.AdvancementProgress;
 import net.minecraft.advancement.PlayerAdvancementTracker;
+import net.minecraft.nbt.NbtCompound;
 import net.minecraft.registry.RegistryKeys;
 import net.minecraft.registry.entry.RegistryEntry;
 import net.minecraft.registry.entry.RegistryEntryList;
@@ -19,7 +22,6 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
-import net.minecraft.world.GameMode;
 import net.minecraft.world.gen.structure.Structure;
 import net.minecraft.world.gen.structure.StructureKeys;
 import org.slf4j.Logger;
@@ -92,7 +94,36 @@ public class GSRCommands {
                             context.getSource().sendFeedback(() -> Text.literal("§6[GSR] Group Death: " + state), true);
                             return 1;
                         }))
+                        .then(literal("exclude_toggle")
+                                .then(argument("player", net.minecraft.command.argument.EntityArgumentType.player())
+                                        .executes(context -> {
+                                            ServerPlayerEntity target = net.minecraft.command.argument.EntityArgumentType.getPlayer(context, "player");
+                                            var excluded = GSRMain.CONFIG.excludedPlayers;
+                                            boolean wasExcluded = excluded.contains(target.getUuid());
+
+                                            if (wasExcluded) {
+                                                excluded.remove(target.getUuid());
+                                                // GLOBAL BROADCAST: Everyone sees the player is back in
+                                                context.getSource().getServer().getPlayerManager().broadcast(
+                                                        Text.literal("§6[GSR] §f" + target.getName().getString() + " §ais now INCLUDED §7in group mechanics."), false);
+                                            } else {
+                                                excluded.add(target.getUuid());
+                                                // GLOBAL BROADCAST: Everyone sees the player is out
+                                                context.getSource().getServer().getPlayerManager().broadcast(
+                                                        Text.literal("§6[GSR] §f" + target.getName().getString() + " §cis now EXCLUDED §7from group mechanics."), false);
+                                            }
+
+                                            GSRMain.saveAndSync(context.getSource().getServer());
+                                            return 1;
+                                        })))
                         .then(literal("max_hp")
+                                // No argument provided: Reset to default (10 hearts)
+                                .executes(context -> {
+                                    updateMaxHearts(context.getSource().getServer(), 10.0f);
+                                    context.getSource().sendFeedback(() -> Text.literal("§6[GSR] Global Max Health: §aReset to default (10)"), true);
+                                    return 1;
+                                })
+                                // Argument provided: Set specific amount
                                 .then(argument("amount", FloatArgumentType.floatArg(0.5f, 100.0f))
                                         .executes(context -> {
                                             float val = FloatArgumentType.getFloat(context, "amount");
@@ -103,42 +134,75 @@ public class GSRCommands {
 
                 .then(literal("hud")
                         .then(literal("visibility_toggle").executes(context -> {
-                            var pConfig = GSRConfigPlayer.INSTANCE;
-                            pConfig.hudMode = (pConfig.hudMode + 1) % 3;
-                            pConfig.save();
-                            String mode = switch (pConfig.hudMode) {
-                                case 0 -> "ALWAYS VISIBLE";
-                                case 1 -> "TAB ONLY";
-                                default -> "HIDDEN";
-                            };
-                            context.getSource().sendFeedback(() -> Text.literal("§6[GSR] HUD Mode: §f" + mode), false);
+                            ServerPlayerEntity player = context.getSource().getPlayer();
+                            if (player == null) return 0;
+                            NbtCompound nbt = new NbtCompound();
+                            nbt.putBoolean("toggleVisibility", true);
+                            ServerPlayNetworking.send(player, new GSRConfigPayload(nbt));
                             return 1;
                         }))
                         .then(literal("side_toggle").executes(context -> {
-                            var pConfig = GSRConfigPlayer.INSTANCE;
-                            pConfig.timerHudOnRight = !pConfig.timerHudOnRight;
-                            pConfig.save();
-                            context.getSource().sendFeedback(() -> Text.literal("§6[GSR] Timer Side: §b" + (pConfig.timerHudOnRight ? "RIGHT" : "LEFT")), false);
+                            ServerPlayerEntity player = context.getSource().getPlayer();
+                            if (player == null) return 0;
+                            NbtCompound nbt = new NbtCompound();
+                            nbt.putBoolean("toggleSide", true);
+                            ServerPlayNetworking.send(player, new GSRConfigPayload(nbt));
                             return 1;
                         }))
                         .then(literal("height_toggle").executes(context -> {
-                            var pConfig = GSRConfigPlayer.INSTANCE;
-                            pConfig.locateHudOnTop = !pConfig.locateHudOnTop;
-                            pConfig.save();
-                            String pos = pConfig.locateHudOnTop ? "TOP" : "BOTTOM";
-                            context.getSource().sendFeedback(() -> Text.literal("§6[GSR] Locate Bar Position: §e" + pos), false);
+                            ServerPlayerEntity player = context.getSource().getPlayer();
+                            if (player == null) return 0;
+                            NbtCompound nbt = new NbtCompound();
+                            nbt.putBoolean("toggleHeight", true);
+                            ServerPlayNetworking.send(player, new GSRConfigPayload(nbt));
                             return 1;
                         }))
                         .then(literal("scale")
-                                .then(argument("value", FloatArgumentType.floatArg(GSRConfigPlayer.MIN_HUD_SCALE, GSRConfigPlayer.MAX_HUD_SCALE))
-                                        .executes(context -> {
-                                            float scale = FloatArgumentType.getFloat(context, "value");
-                                            GSRConfigPlayer.INSTANCE.timerHudScale = scale;
-                                            GSRConfigPlayer.INSTANCE.locateHudScale = scale;
-                                            GSRConfigPlayer.INSTANCE.save();
-                                            context.getSource().sendFeedback(() -> Text.literal("§6[GSR] HUD Scale set to: §f" + String.format("%.2f", scale)), false);
-                                            return 1;
-                                        }))))
+                                .then(literal("overall")
+                                        .then(argument("value", FloatArgumentType.floatArg(GSRConfigPlayer.MIN_OVERALL_SCALE, GSRConfigPlayer.MAX_OVERALL_SCALE))
+                                                .executes(context -> {
+                                                    ServerPlayerEntity player = context.getSource().getPlayer();
+                                                    if (player == null) return 0;
+                                                    float val = FloatArgumentType.getFloat(context, "value");
+                                                    NbtCompound nbt = new NbtCompound();
+                                                    nbt.putFloat("overallScale", val);
+                                                    ServerPlayNetworking.send(player, new GSRConfigPayload(nbt));
+                                                    context.getSource().sendFeedback(() -> Text.literal("§6[GSR] §7Overall Scale set to: §f" + val), false);
+                                                    return 1;
+                                                })))
+                                .then(literal("timer")
+                                        .then(argument("value", FloatArgumentType.floatArg(GSRConfigPlayer.MIN_TIMER_SCALE, GSRConfigPlayer.MAX_TIMER_SCALE))
+                                                .executes(context -> {
+                                                    ServerPlayerEntity player = context.getSource().getPlayer();
+                                                    if (player == null) return 0;
+                                                    float val = FloatArgumentType.getFloat(context, "value");
+                                                    NbtCompound nbt = new NbtCompound();
+                                                    nbt.putFloat("timerScale", val);
+                                                    ServerPlayNetworking.send(player, new GSRConfigPayload(nbt));
+                                                    context.getSource().sendFeedback(() -> Text.literal("§6[GSR] §7Timer Scale set to: §f" + val), false);
+                                                    return 1;
+                                                })))
+                                .then(literal("locate")
+                                        .then(argument("value", FloatArgumentType.floatArg(GSRConfigPlayer.MIN_LOCATE_SCALE, GSRConfigPlayer.MAX_LOCATE_SCALE))
+                                                .executes(context -> {
+                                                    ServerPlayerEntity player = context.getSource().getPlayer();
+                                                    if (player == null) return 0;
+                                                    float val = FloatArgumentType.getFloat(context, "value");
+                                                    NbtCompound nbt = new NbtCompound();
+                                                    nbt.putFloat("locateScale", val);
+                                                    ServerPlayNetworking.send(player, new GSRConfigPayload(nbt));
+                                                    context.getSource().sendFeedback(() -> Text.literal("§6[GSR] §7Locate Scale set to: §f" + val), false);
+                                                    return 1;
+                                                }))))
+                        .then(literal("reset").executes(context -> {
+                            ServerPlayerEntity player = context.getSource().getPlayer();
+                            if (player == null) return 0;
+                            NbtCompound nbt = new NbtCompound();
+                            nbt.putBoolean("resetHud", true);
+                            ServerPlayNetworking.send(player, new GSRConfigPayload(nbt));
+                            context.getSource().sendFeedback(() -> Text.literal("§6[GSR] §aHUD settings reset to defaults."), false);
+                            return 1;
+                        })))
 
                 .then(literal("locate")
                         .requires(source -> {
@@ -161,21 +225,36 @@ public class GSRCommands {
 
     private static void displayStatus(ServerCommandSource source) {
         var worldConfig = GSRMain.CONFIG;
-        var playerConfig = GSRConfigPlayer.INSTANCE;
-        String hudStatus = switch (playerConfig.hudMode) {
-            case 0 -> "§aALWAYS VISIBLE";
-            case 1 -> "§bTAB ONLY";
-            default -> "§cHIDDEN";
-        };
+        ServerPlayerEntity player = source.getPlayer();
+        if (player == null) return;
+
+        var pConfig = GSRMain.getPlayerConfig(player);
+
         source.sendFeedback(() -> Text.literal(
-                "§6§l[GSR] Current Configuration:\n" +
-                        "§f- HUD Mode: " + hudStatus + "\n" +
-                        "§f- Timer Side: §b" + (playerConfig.timerHudOnRight ? "RIGHT" : "LEFT") + "\n" +
-                        "§f- Locate Pos: §e" + (playerConfig.locateHudOnTop ? "TOP" : "BOTTOM") + "\n" +
+                "§6§l[GSR] Status Overview\n" +
+                        "§e--- Global Run Settings ---\n" +
                         "§f- Group Death: " + (worldConfig.groupDeathEnabled ? "§aON" : "§cOFF") + "\n" +
                         "§f- Shared HP: " + (worldConfig.sharedHealthEnabled ? "§aON" : "§cOFF") + "\n" +
-                        "§f- Max Hearts: §c" + worldConfig.maxHearts
+                        "§f- Max Hearts: §c" + worldConfig.maxHearts + "\n" +
+                        "§e--- Your HUD Preferences ---\n" +
+                        "§f- Visibility: " + getHudModeName(pConfig.hudMode) + "\n" +
+                        "§f- Timer Side: §b" + (pConfig.timerHudOnRight ? "Right" : "Left") + "\n" +
+                        "§f- Locate Bar: §b" + (pConfig.locateHudOnTop ? "Top" : "Bottom") + "\n" +
+                        "§f- HUD Scale: §b" + pConfig.hudOverallScale + "x §7(Min: " + GSRConfigPlayer.MIN_OVERALL_SCALE + " | Max: " + GSRConfigPlayer.MAX_OVERALL_SCALE + ")"
         ), false);
+    }
+
+    /**
+     * Helper to turn the integer hudMode into a readable string
+     */
+    private static String getHudModeName(int mode) {
+        return switch (mode) {
+            case 0 -> "§aVisible (Full)";
+            case 1 -> "§eTimer Only";
+            case 2 -> "§eLocate Only";
+            case 3 -> "§cHidden";
+            default -> "§7Unknown";
+        };
     }
 
     private static int togglePause(ServerCommandSource source, boolean shouldPause) {
@@ -189,8 +268,6 @@ public class GSRCommands {
             config.isTimerFrozen = false;
             config.startTime = System.currentTimeMillis() - config.frozenTime;
             source.getServer().getPlayerManager().broadcast(Text.literal("§6[GSR] §aTimer Resumed!"), false);
-        } else {
-            source.sendFeedback(() -> Text.literal("§e[GSR] Timer is already " + (shouldPause ? "paused." : "running.")), false);
         }
         GSRMain.saveAndSync(source.getServer());
         return 1;
@@ -228,7 +305,6 @@ public class GSRCommands {
         ServerPlayerEntity player = source.getPlayer();
         if (player == null) return 0;
         ServerWorld world = source.getWorld();
-        var server = source.getServer();
         var structureRegistry = world.getRegistryManager().getOrThrow(RegistryKeys.STRUCTURE);
 
         var structureKey = switch (type.toLowerCase()) {
@@ -248,24 +324,7 @@ public class GSRCommands {
             if (result != null) {
                 BlockPos pos = result.getFirst();
                 var config = GSRMain.CONFIG;
-
-                if (type.equalsIgnoreCase("ship")) {
-                    var accessor = world.getStructureAccessor();
-                    var start = accessor.getStructureAt(pos, structureEntry.get().value());
-
-                    if (start != null && start.hasChildren()) {
-                        boolean hasShip = start.getChildren().stream()
-                                .anyMatch(piece -> {
-                                    String id = piece.getType().toString().toLowerCase();
-                                    return id.contains("ship") || id.contains("end_city_ship");
-                                });
-
-                        if (!hasShip) {
-                            source.sendError(Text.literal("§6[GSR] §cFound End City at " + pos.getX() + ", " + pos.getZ() + " but it has no Ship!"));
-                            return 0;
-                        }
-                    }
-                }
+                if (config == null) return 0;
 
                 switch (type.toLowerCase()) {
                     case "fortress" -> { config.fortressX = pos.getX(); config.fortressZ = pos.getZ(); config.fortressActive = true; }
@@ -274,31 +333,29 @@ public class GSRCommands {
                     case "ship" -> { config.shipX = pos.getX(); config.shipZ = pos.getZ(); config.shipActive = true; }
                 }
 
-                GSRMain.saveAndSync(server);
-                source.sendFeedback(() -> Text.literal("§6[GSR] " + type + " located at §f" + pos.getX() + ", " + pos.getZ() + " §a(HUD ON)"), false);
+                GSRMain.saveAndSync(source.getServer());
+
+                // GLOBAL BROADCAST: Notify everyone of the found coordinates
+                source.getServer().getPlayerManager().broadcast(
+                        Text.literal("§6[GSR] §f" + type + " §7located at §a" + pos.getX() + ", " + pos.getZ() + " §7(HUD Updated)"), false);
+
                 return 1;
             }
         }
-
         source.sendError(Text.literal("§6[GSR] §cCould not find " + type + " in this dimension."));
         return 0;
     }
 
     private static void executeReset(MinecraftServer server) {
         net.minecraft.server.world.ServerWorld overworld = server.getOverworld();
-
-        // 1. Silence feedback
         overworld.getGameRules().setValue(net.minecraft.world.rule.GameRules.SEND_COMMAND_FEEDBACK, false, server);
 
-        // 2. Reset global run state
         var config = GSRMain.CONFIG;
         config.startTime = -1;
         config.isTimerFrozen = false;
         config.frozenTime = 0;
         config.isFailed = false;
         config.isVictorious = false;
-
-        // --- NEW: Reset the splits in the manager ---
         GSRSplitManager.resetSplits();
 
         config.fortressActive = false;
@@ -306,14 +363,12 @@ public class GSRCommands {
         config.strongholdActive = false;
         config.shipActive = false;
 
-        // 3. Reset world and players
         overworld.setTimeOfDay(0);
         GSRStats.reset();
         GSREvents.resetHealth();
 
-        net.minecraft.util.math.BlockPos spawnPos = overworld.getSpawnPoint().getPos();
-
-        for (net.minecraft.server.network.ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
+        BlockPos spawnPos = overworld.getSpawnPoint().getPos();
+        for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
             p.changeGameMode(net.minecraft.world.GameMode.SURVIVAL);
             p.getInventory().clear();
             p.getHungerManager().setFoodLevel(20);
@@ -325,17 +380,16 @@ public class GSRCommands {
             p.setExperiencePoints(0);
             p.teleport(overworld, spawnPos.getX() + 0.5, spawnPos.getY(), spawnPos.getZ() + 0.5, java.util.Collections.emptySet(), 0.0f, 0.0f, true);
 
-            net.minecraft.advancement.PlayerAdvancementTracker tracker = p.getAdvancementTracker();
+            PlayerAdvancementTracker tracker = p.getAdvancementTracker();
             server.getAdvancementLoader().getAdvancements().forEach(entry -> {
-                net.minecraft.advancement.AdvancementProgress progress = tracker.getProgress(entry);
+                AdvancementProgress progress = tracker.getProgress(entry);
                 for (String criteria : progress.getObtainedCriteria()) {
                     tracker.revokeCriterion(entry, criteria);
                 }
             });
         }
-
         GSRMain.saveAndSync(server);
-        server.getPlayerManager().broadcast(net.minecraft.text.Text.literal("§6§l[GSR] Run Reset, Go!"), false);
+        server.getPlayerManager().broadcast(Text.literal("§6§l[GSR] Run Reset, Go!"), false);
     }
 
     private static void clearAllLocates(MinecraftServer server) {

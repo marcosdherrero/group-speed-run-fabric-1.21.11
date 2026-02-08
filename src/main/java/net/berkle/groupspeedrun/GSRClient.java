@@ -1,6 +1,7 @@
 package net.berkle.groupspeedrun;
 
 import net.berkle.groupspeedrun.config.GSRConfigPayload;
+import net.berkle.groupspeedrun.config.GSRConfigPlayer;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 
@@ -10,20 +11,25 @@ import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
  */
 public class GSRClient implements ClientModInitializer {
 
+    // This instance will store the local player's UI preferences
+    public static final GSRConfigPlayer PLAYER_CONFIG = new GSRConfigPlayer();
+
     @Override
     public void onInitializeClient() {
-        // Register receiver for the native NBT sync packet
         ClientPlayNetworking.registerGlobalReceiver(GSRConfigPayload.ID, (payload, context) -> {
-            // Unpacking binary NBT is much faster than parsing a JSON String
             var nbt = payload.nbt();
 
-            /*
-             * Update the config on the main thread to ensure the HUD
-             * doesn't see a "half-updated" state during a frame render.
-             */
             context.client().execute(() -> {
-                if (GSRMain.CONFIG != null) {
+                // 1. Sync World Data (Timer, Structures, Run State)
+                // We check for a world-specific key like "startTime"
+                if (nbt.contains("startTime") && GSRMain.CONFIG != null) {
                     GSRMain.CONFIG.readNbt(nbt);
+                }
+
+                // 2. Sync Player Data (Scale, HUD Mode, Positions)
+                // These are the values you fixed in the Player Config
+                if (nbt.contains("timerScale") || nbt.contains("hudMode")) {
+                    PLAYER_CONFIG.readNbt(nbt);
                 }
             });
         });

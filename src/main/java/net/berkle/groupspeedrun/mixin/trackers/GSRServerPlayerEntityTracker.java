@@ -118,34 +118,16 @@ public abstract class GSRServerPlayerEntityTracker {
     @Inject(method = "onDeath", at = @At("HEAD"), cancellable = true)
     private void onPlayerDeath(DamageSource source, CallbackInfo ci) {
         ServerPlayerEntity player = (ServerPlayerEntity) (Object) this;
+
+        // Simply pass the work to your existing logic handler
+        // This ensures exclusion lists, sound effects, and spectator logic
+        // are all handled in one central place (GSREvents).
+        net.berkle.groupspeedrun.GSREvents.handlePlayerDeath(player, this.server);
+
+        // If Group Death is enabled and the run is active,
+        // cancel the vanilla death screen.
         var config = GSRMain.CONFIG;
-
-        if (config != null && config.startTime != -1 && config.groupDeathEnabled && !config.isFailed && !config.isVictorious) {
-
-            // 1. Lock state
-            config.frozenTime = System.currentTimeMillis() - config.startTime;
-            config.isFailed = true;
-
-            // 2. Generate stats and broadcast
-            var awards = GSRRunHistoryManager.calculateAwards(this.server, "FAILURE", player.getUuid().toString());
-            GSRBroadcastManager.broadcastFailure(
-                    this.server,
-                    config.getElapsedTime(),
-                    player.getName().getString(),
-                    source.getDeathMessage(player).getString(),
-                    awards
-            );
-
-            // 3. THE FIX: Put everyone in spectator mode
-            for (ServerPlayerEntity p : this.server.getPlayerManager().getPlayerList()) {
-                p.changeGameMode(net.minecraft.world.GameMode.SPECTATOR);
-                // Play a sound to emphasize the loss
-                p.playSound(net.minecraft.sound.SoundEvents.ENTITY_LIGHTNING_BOLT_THUNDER, 1.0f, 1.0f);
-            }
-
-            GSRMain.saveAndSync(this.server);
-
-            // 4. Cancel vanilla death so player doesn't actually see the "You Died" screen
+        if (config != null && config.groupDeathEnabled && config.startTime > 0 && !config.isVictorious) {
             ci.cancel();
         }
     }

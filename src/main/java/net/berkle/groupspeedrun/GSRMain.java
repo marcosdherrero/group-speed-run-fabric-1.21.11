@@ -1,6 +1,7 @@
 package net.berkle.groupspeedrun;
 
 import net.berkle.groupspeedrun.config.GSRConfigWorld;
+import net.berkle.groupspeedrun.config.GSRConfigPlayer; // Added
 import net.berkle.groupspeedrun.config.GSRConfigPayload;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
@@ -9,14 +10,23 @@ import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.network.ServerPlayerEntity; // Added
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.util.HashMap; // Added
+import java.util.Map;     // Added
+import java.util.UUID;    // Added
 
 public class GSRMain implements ModInitializer {
 	public static final String MOD_ID = "groupspeedrun";
 	public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
 
 	public static GSRConfigWorld CONFIG = new GSRConfigWorld();
+
+	// --- [ NEW: Player Config Storage ] ---
+	private static final Map<UUID, GSRConfigPlayer> PLAYER_CONFIGS = new HashMap<>();
+
 	private static boolean isServerActive = false;
 
 	@Override
@@ -33,12 +43,16 @@ public class GSRMain implements ModInitializer {
 			GSRNetworking.syncConfigWithPlayer(handler.getPlayer());
 		});
 
+		// Clean up player configs when they leave to prevent memory leaks
+		ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> {
+			PLAYER_CONFIGS.remove(handler.getPlayer().getUuid());
+		});
+
 		ServerLifecycleEvents.SERVER_STARTING.register(server -> {
 			CONFIG = GSRConfigWorld.load(server);
 			GSRStats.load(server);
 
 			if (CONFIG.startTime != -1) {
-				// GATE: Only resume if the run was actually in progress
 				if (!CONFIG.isTimerFrozen && !CONFIG.isVictorious && !CONFIG.isFailed) {
 					CONFIG.startTime = System.currentTimeMillis() - CONFIG.frozenTime;
 					LOGGER.info("[GSR] Active run detected: Resuming timer.");
@@ -60,9 +74,7 @@ public class GSRMain implements ModInitializer {
 			LOGGER.info("[GSR] Server fully loaded. World access safe.");
 		});
 
-		// 6. SERVER SHUTDOWN LOGIC
 		ServerLifecycleEvents.SERVER_STOPPING.register(server -> {
-			// FIX: Only update the 'frozen' snapshot if the run hasn't finished/failed yet
 			if (CONFIG.startTime != -1 && !CONFIG.isTimerFrozen && !CONFIG.isFailed && !CONFIG.isVictorious) {
 				CONFIG.frozenTime = System.currentTimeMillis() - CONFIG.startTime;
 			}
@@ -76,16 +88,19 @@ public class GSRMain implements ModInitializer {
 	}
 
 	/**
-	 * Called every tick (~50ms).
+	 * Helper to retrieve or create a player's HUD configuration.
+	 * This fixes the "cannot find symbol" error in GSRCommands.
 	 */
+	public static GSRConfigPlayer getPlayerConfig(ServerPlayerEntity player) {
+		return PLAYER_CONFIGS.computeIfAbsent(player.getUuid(), uuid -> new GSRConfigPlayer());
+	}
+
 	private void onServerTick(MinecraftServer server) {
 		if (!isServerActive || server == null) return;
 
 		GSREvents.onTick(server);
 
-		// Periodic Save (Every 5 seconds / 100 ticks)
 		if (server.getTicks() % 100 == 0) {
-			// FIX: Ensure the timer snapshot stops moving when the run ends
 			if (CONFIG.startTime != -1 && !CONFIG.isTimerFrozen && !CONFIG.isFailed && !CONFIG.isVictorious) {
 				CONFIG.frozenTime = System.currentTimeMillis() - CONFIG.startTime;
 			}

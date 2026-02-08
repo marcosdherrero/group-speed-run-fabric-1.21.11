@@ -20,7 +20,6 @@ public class GSRBroadcastManager {
         PlayerManager pm = server.getPlayerManager();
         long currentTicks = GSREvents.getRunTicks(server);
 
-        // We use your existing logic!
         // Passing "LIVE" ensures that the "Roast Logic" in RunHistoryManager is triggered.
         JsonObject awards = GSRRunHistoryManager.calculateAwards(server, "LIVE", "");
 
@@ -57,13 +56,18 @@ public class GSRBroadcastManager {
                 : "§6Current Time: ";
         pm.broadcast(Text.literal(timeLabel + "§f" + GSRFormatUtil.formatTime(ticks)), false);
 
-        // --- SECTION 1: PERFORMANCE (Now shown on Victory, Failure, or Command) ---
-        if (hasAnyData(awards, "dragon_warrior", "adc", "killer", "tank", "defender", "healer", "brew_master", "pog_champ", "builder", "sightseer")) {
+        // --- SECTION 1: PERFORMANCE ---
+        // Added 'pearl_hoarder' to the data check
+        if (hasAnyData(awards, "dragon_warrior", "adc", "killer", "pearl_hoarder", "tank", "defender", "healer", "brew_master", "pog_champ", "builder", "sightseer")) {
             pm.broadcast(Text.literal("§8§o-- Performance Awards --"), false);
 
             display(pm, awards, "dragon_warrior", "§5🐉 Dragon Warrior", " dragon damage");
             display(pm, awards, "adc", "§6🏹 ADC", " most damage");
             display(pm, awards, "killer", "§4💀 Serial Killer", " most kills");
+
+            // NEW: Pearl Hoarder Display
+            display(pm, awards, "pearl_hoarder", "§3🔮 Pearl Hoarder", " pearls");
+
             display(pm, awards, "tank", "§4❈ Tank", " damage taken");
             display(pm, awards, "defender", "§b🛡 Defender", " armor");
             display(pm, awards, "healer", "§d❤ Healer", " HP healed");
@@ -73,7 +77,7 @@ public class GSRBroadcastManager {
             display(pm, awards, "sightseer", "§f👣 Sightseer", " blocks moved");
         }
 
-        // --- SECTION 2: THE ROASTS (Now shown on Victory, Failure, or Command) ---
+        // --- SECTION 2: THE ROASTS ---
         if (hasAnyData(awards, "shuffler", "coward", "weakling", "good_for_nothing")) {
             pm.broadcast(Text.literal("§8§o-- Hall of Shame --"), false);
 
@@ -107,7 +111,6 @@ public class GSRBroadcastManager {
 
                 if (val <= 0.001 || name.equalsIgnoreCase("None") || name.isEmpty()) return;
 
-                // Format: Integers stay as integers, Floats get 1 decimal point
                 String fVal = (val == (int) val) ? String.valueOf((int) val) : String.format("%.1f", val);
                 pm.broadcast(Text.literal(label + ": §b" + name + " §f(" + fVal + unit + ")"), false);
 

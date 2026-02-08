@@ -1,91 +1,105 @@
 package net.berkle.groupspeedrun.config;
 
-import net.fabricmc.loader.api.FabricLoader;
-import net.minecraft.util.math.MathHelper;
-import org.jspecify.annotations.NonNull;
+import net.minecraft.nbt.NbtCompound;
 import org.slf4j.Logger;
-import org.slf4j.LoggerFactory; // New Import
-import java.io.*;
-import java.util.Properties;
+import org.slf4j.LoggerFactory;
 
+/**
+ * Client-Side Configuration for GroupSpeedrun.
+ * Handles individual player preferences like HUD scaling and positioning.
+ */
 public class GSRConfigPlayer {
-    private static final Logger LOGGER = LoggerFactory.getLogger("GSR-Config"); // Initialize Logger
-    private static final File FILE = FabricLoader.getInstance().getConfigDir().resolve("groupspeedrun_player.txt").toFile();
-    public static final GSRConfigPlayer INSTANCE = load();
+    private static final Logger LOGGER = LoggerFactory.getLogger("GSR-PlayerConfig");
 
-    // Overall hud scaling and positioning
-    public static final float MIN_HUD_SCALE = 0.5f;
-    public static final float MAX_HUD_SCALE = 3.5f;
+    // --- [ ABSOLUTE SCALE CONSTANTS ] ---
+    // These define the hard limits for the /gsr hud scale commands
+    public static final float MIN_TIMER_SCALE = 0.5f;
+    public static final float MAX_TIMER_SCALE = 3.0f;
+
+    public static final float MIN_LOCATE_SCALE = 0.5f;
+    public static final float MAX_LOCATE_SCALE = 2.0f;
+
+    public static final float MIN_OVERALL_SCALE = 0.5f;
+    public static final float MAX_OVERALL_SCALE = 2.5f;
+
+    public float MIN_ICON_SCALE = 0.5f;
+    public float MAX_ICON_SCALE = 1.2f;
+
+    // --- [ HUD SETTINGS ] ---
+    public float hudOverallScale = 1.0f; // Multiplier for all HUD elements
+    public float timerHudScale = 1.0f;
+    public float locateHudScale = 1.0f;
+
+    // 0 = Both, 1 = Timer Only, 2 = Locate Bar Only, 3 = Hidden
+    public int hudMode = 0;
+
     public boolean timerHudOnRight = true;
     public boolean locateHudOnTop = true;
-    public int hudMode = 1;
 
-    // Timer Constraints
-    public float timerHudScale = 1.0f;
-    public final float MIN_TIMER_SCALE = 0.5f;
-    public final float MAX_TIMER_SCALE = 3.5f;
+    // --- [ COMPASS / LOCATE BAR SETTINGS ] ---
+    public int barWidth = 180;
+    public int barHeight = 3;
+    public int maxScaleDistance = 500;
 
-    // Locate Bar Constraints
-    public int barWidth = 100;
-    public int barHeight = 4;
-    public int maxScaleDistance = 1000;
-    public float locateHudScale = 0.95f;
+    // These act as the bounds for the "breathing/distance" effect of the icons
+    public float minIconScale = 0.5f;
+    public float maxIconScale = 1.0f;
 
-    public final float MIN_ICON_SCALE = 0.5f;
-    public final float MAX_ICON_SCALE = 1.0f;
-    public final float MIN_LOCATE_SCALE = 0.5f;
-    public final float MAX_LOCATE_SCALE = 3.5f;
-
-    public static GSRConfigPlayer load() {
-        GSRConfigPlayer config = new GSRConfigPlayer();
-        if (!FILE.exists()) {
-            LOGGER.info("No player config found at {}, using defaults.", FILE.getName());
-            return config;
-        }
-
-        Properties p = new Properties();
-        try (BufferedReader r = new BufferedReader(new FileReader(FILE))) {
-            p.load(r);
-            config.timerHudScale = Float.parseFloat(p.getProperty("timerScale", "1.0"));
-            config.locateHudScale = Float.parseFloat(p.getProperty("locateScale", "0.95"));
-            config.timerHudOnRight = Boolean.parseBoolean(p.getProperty("timerRight", "true"));
-            config.locateHudOnTop = Boolean.parseBoolean(p.getProperty("locateTop", "true"));
-            config.hudMode = Integer.parseInt(p.getProperty("hudMode", "1"));
-            config.barWidth = Integer.parseInt(p.getProperty("barWidth", "100"));
-            config.barHeight = Integer.parseInt(p.getProperty("barHeight", "4"));
-            config.maxScaleDistance = Integer.parseInt(p.getProperty("maxDist", "1000"));
-            LOGGER.info("Successfully loaded player preferences from {}.", FILE.getName());
-        } catch (Exception e) {
-            LOGGER.error("Failed to load player config!", e); // Now actually reporting the error
-        }
-        return config;
+    /**
+     * Resets player-specific UI settings to defaults.
+     */
+    public void resetToDefaults() {
+        this.hudOverallScale = 1.0f;
+        this.timerHudScale = 1.0f;
+        this.locateHudScale = 1.0f;
+        this.hudMode = 0;
+        this.timerHudOnRight = true;
+        this.locateHudOnTop = true;
+        this.barWidth = 180;
+        this.barHeight = 3;
+        this.maxScaleDistance = 500;
+        this.minIconScale = 0.5f;
+        this.maxIconScale = 1.0f;
     }
 
-    public void save() {
-        // Enforce bounds during save
-        this.timerHudScale = MathHelper.clamp(this.timerHudScale, MIN_TIMER_SCALE, MAX_TIMER_SCALE);
-        this.locateHudScale = MathHelper.clamp(this.locateHudScale, MIN_LOCATE_SCALE, MAX_LOCATE_SCALE);
-
-        Properties p = getProperties();
-        try (BufferedWriter w = new BufferedWriter(new FileWriter(FILE))) {
-            p.store(w, "GSR Individual Player Preferences");
-            LOGGER.info("Saved player preferences (Timer: {}x, Locate: {}x, Top: {})",
-                    timerHudScale, locateHudScale, locateHudOnTop);
-        } catch (Exception e) {
-            LOGGER.error("Could not save player config!", e);
-        }
+    /**
+     * Serializes player preferences to NBT.
+     */
+    public void writeNbt(NbtCompound nbt) {
+        nbt.putFloat("overallScale", hudOverallScale);
+        nbt.putFloat("timerScale", timerHudScale);
+        nbt.putFloat("locateScale", locateHudScale);
+        nbt.putInt("hudMode", hudMode);
+        nbt.putBoolean("timerRight", timerHudOnRight);
+        nbt.putBoolean("locateTop", locateHudOnTop);
+        nbt.putInt("barWidth", barWidth);
+        nbt.putInt("maxDist", maxScaleDistance);
+        nbt.putFloat("minIconS", minIconScale);
+        nbt.putFloat("maxIconS", maxIconScale);
     }
 
-    private @NonNull Properties getProperties() {
-        Properties p = new Properties();
-        p.setProperty("timerScale", String.valueOf(timerHudScale));
-        p.setProperty("locateScale", String.valueOf(locateHudScale));
-        p.setProperty("timerRight", String.valueOf(timerHudOnRight));
-        p.setProperty("locateTop", String.valueOf(locateHudOnTop));
-        p.setProperty("hudMode", String.valueOf(hudMode));
-        p.setProperty("barWidth", String.valueOf(barWidth));
-        p.setProperty("barHeight", String.valueOf(barHeight));
-        p.setProperty("maxDist", String.valueOf(maxScaleDistance));
-        return p;
+    /**
+     * Deserializes player preferences from NBT.
+     * Uses the 1.21 pattern for retrieving values.
+     */
+    public void readNbt(NbtCompound nbt) {
+        if (nbt == null) return;
+
+        this.hudOverallScale = nbt.getFloat("overallScale", 1.0f);
+        this.timerHudScale = nbt.getFloat("timerScale", 1.0f);
+        this.locateHudScale = nbt.getFloat("locateScale", 1.0f);
+        this.hudMode = nbt.getInt("hudMode", 0);
+        this.timerHudOnRight = nbt.getBoolean("timerRight", true);
+        this.locateHudOnTop = nbt.getBoolean("locateTop", true);
+        this.barWidth = nbt.getInt("barWidth", 180);
+        this.maxScaleDistance = nbt.getInt("maxDist", 500);
+        this.minIconScale = nbt.getFloat("minIconS", 0.5f);
+        this.maxIconScale = nbt.getFloat("maxIconS", 1.0f);
+
+        LOGGER.debug("GSR Player Config updated via NBT.");
+    }
+
+    public void cycleHudMode() {
+        this.hudMode = (this.hudMode + 1) % 4;
     }
 }

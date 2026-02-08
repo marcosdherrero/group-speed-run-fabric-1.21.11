@@ -10,7 +10,7 @@ import java.util.UUID;
 
 @Mixin(BossBarHud.class)
 public interface BossBarHudAccessor {
-    // This string "bossBars" must match the internal Minecraft field name
+    // Accesses the private map of boss bars so we can count them for HUD offset
     @Accessor("bossBars")
     Map<UUID, ClientBossBar> getGSRBossBars();
 }

@@ -37,4 +37,16 @@ public class GSRNetworking {
         GSRMain.CONFIG.writeNbt(nbt);
         ServerPlayNetworking.send(player, new GSRConfigPayload(nbt));
     }
+
+    /**
+     * Sends a specific scale update to a single player.
+     */
+    public static void sendScaleUpdate(ServerPlayerEntity player, float scale) {
+        NbtCompound nbt = new NbtCompound();
+        nbt.putFloat("timerScale", scale);
+        nbt.putFloat("locateScale", scale);
+
+        // We send this to the specific player, not the whole server
+        ServerPlayNetworking.send(player, new GSRConfigPayload(nbt));
+    }
 }

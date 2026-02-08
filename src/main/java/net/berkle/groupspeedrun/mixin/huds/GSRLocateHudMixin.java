@@ -1,11 +1,13 @@
 package net.berkle.groupspeedrun.mixin.huds;
 
 import net.berkle.groupspeedrun.GSRMain;
+import net.berkle.groupspeedrun.GSRClient;
 import net.berkle.groupspeedrun.config.GSRConfigPlayer;
-import net.berkle.groupspeedrun.mixin.accessors.BossBarHudAccessor; // NEW IMPORT
+import net.berkle.groupspeedrun.mixin.accessors.BossBarHudAccessor;
 import net.berkle.groupspeedrun.util.GSRColorHelper;
 import net.berkle.groupspeedrun.util.GSRAlphaUtil;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.font.TextRenderer;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.hud.InGameHud;
 import net.minecraft.client.render.RenderTickCounter;
@@ -15,6 +17,7 @@ import net.minecraft.util.math.MathHelper;
 import net.minecraft.registry.RegistryKey;
 import net.minecraft.world.World;
 import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
@@ -30,11 +33,11 @@ public class GSRLocateHudMixin {
         var config = GSRMain.CONFIG;
         if (config == null || config.startTime < 0) return;
 
-        var pConfig = GSRConfigPlayer.INSTANCE;
+        GSRConfigPlayer pConfig = GSRClient.PLAYER_CONFIG;
 
-        // --- FADE & VISIBILITY LOGIC ---
         boolean isFinished = config.isVictorious || config.isFailed;
-        long ticksSinceEnd = client.world.getTime() - config.frozenTime;
+        long currentTime = client.world.getTime();
+        long ticksSinceEnd = currentTime - config.lastSplitTime;
         float fadeAlpha = GSRAlphaUtil.getFadeAlpha(client, config, isFinished, ticksSinceEnd);
 
         if (fadeAlpha <= 0.01f) return;
@@ -48,136 +51,109 @@ public class GSRLocateHudMixin {
 
         if (!showFortress && !showBastion && !showStronghold && !showShip) return;
 
-        // --- UI POSITIONING ---
         int centerX = context.getScaledWindowWidth() / 2;
-        int screenH = context.getScaledWindowHeight();
+        int y = pConfig.locateHudOnTop ? 15 : context.getScaledWindowHeight() - 70;
 
-        int y;
         if (pConfig.locateHudOnTop) {
-            // Start with a base 15px margin from the top
-            int topOffset = 15;
-
-            // Cast the BossBarHud to our Accessor interface
             var bossBarHud = client.inGameHud.getBossBarHud();
             var activeBars = ((BossBarHudAccessor) bossBarHud).getGSRBossBars();
-
-            if (!activeBars.isEmpty()) {
-                // Each vanilla boss bar is roughly 19px high including spacing
-                // We shift down based on the number of bars + extra 5px buffer
-                topOffset += (activeBars.size() * 19);
-            }
-            y = topOffset;
-        } else {
-            // Bottom position (above hotbar/experience bar)
-            y = screenH - 70;
+            if (!activeBars.isEmpty()) y += (activeBars.size() * 19);
         }
 
-        // Render the base tracking bar
-        renderTrackingBar(context, centerX, y, fadeAlpha);
+        renderTrackingBar(context, pConfig, centerX, y, fadeAlpha);
 
-        // Render active icons
-        if (showFortress) {
-            renderIcon(context, client, centerX, y, config.fortressX, config.fortressZ,
-                    new ItemStack(Items.BLAZE_ROD), config.getFortressColorInt(), fadeAlpha);
-        }
-        if (showBastion) {
-            renderIcon(context, client, centerX, y, config.bastionX, config.bastionZ,
-                    new ItemStack(Items.PIGLIN_HEAD), config.getBastionColorInt(), fadeAlpha);
-        }
-        if (showStronghold) {
-            renderIcon(context, client, centerX, y, config.strongholdX, config.strongholdZ,
-                    new ItemStack(Items.ENDER_EYE), config.getStrongholdColorInt(), fadeAlpha);
-        }
-        if (showShip) {
-            renderIcon(context, client, centerX, y, config.shipX, config.shipZ,
-                    new ItemStack(Items.ELYTRA), config.getShipColorInt(), fadeAlpha);
-        }
+        if (showFortress) renderIcon(context, client, pConfig, centerX, y, config.fortressX, config.fortressZ, new ItemStack(Items.BLAZE_ROD), config.getFortressColorInt(), fadeAlpha);
+        if (showBastion) renderIcon(context, client, pConfig, centerX, y, config.bastionX, config.bastionZ, new ItemStack(Items.PIGLIN_HEAD), config.getBastionColorInt(), fadeAlpha);
+        if (showStronghold) renderIcon(context, client, pConfig, centerX, y, config.strongholdX, config.strongholdZ, new ItemStack(Items.ENDER_EYE), config.getStrongholdColorInt(), fadeAlpha);
+        if (showShip) renderIcon(context, client, pConfig, centerX, y, config.shipX, config.shipZ, new ItemStack(Items.ELYTRA), config.getShipColorInt(), fadeAlpha);
     }
 
-    /**
-     * Renders the horizontal compass bar background and borders.
-     */
-    private void renderTrackingBar(DrawContext context, int centerX, int y, float alpha) {
-        var pConfig = GSRConfigPlayer.INSTANCE;
-        float hudScale = pConfig.locateHudScale;
-        int halfWidth = (int) ((pConfig.barWidth / 2.0) * hudScale);
-        int barHeight = (int) (pConfig.barHeight * hudScale);
-
-        int x1 = centerX - halfWidth;
-        int x2 = centerX + halfWidth;
+    @Unique
+    private void renderTrackingBar(DrawContext context, GSRConfigPlayer pConfig, int centerX, int y, float alpha) {
+        float scale = pConfig.locateHudScale;
+        int halfW = (int) ((pConfig.barWidth / 2.0) * scale);
+        int barH = (int) (pConfig.barHeight * scale);
+        int x1 = centerX - halfW;
+        int x2 = centerX + halfW;
         int y1 = y + 7;
-        int y2 = y1 + barHeight;
 
-        context.fill(x1, y1, x2, y2, GSRColorHelper.applyAlpha(0x000000, alpha));
-        renderHorizontalGradient(context, x1, y1, x2, y2,
-                GSRColorHelper.applyAlpha(0x333333, alpha),
-                GSRColorHelper.applyAlpha(0x444444, alpha));
+        context.fill(x1, y1, x2, y1 + barH, GSRColorHelper.applyAlpha(0x000000, 0.5f * alpha));
+        renderHorizontalGradient(context, x1, y1, x2, y1 + barH, GSRColorHelper.applyAlpha(0x333333, alpha), GSRColorHelper.applyAlpha(0x444444, alpha));
+
+        // Tick Marks
+        for (int i = 0; i < 5; i++) {
+            float rel = (i / 4.0f) * 2 - 1;
+            int tx = centerX + (int)(rel * halfW);
+            int tTall = (i % 2 == 0) ? 3 : 2;
+            context.fill(tx, y1 - tTall, tx + 1, y1, GSRColorHelper.applyAlpha(0xCCCCCC, alpha * 0.8f));
+        }
 
         context.fill(x1, y1 - 1, x2, y1, GSRColorHelper.applyAlpha(0xAAAAAA, alpha));
-        context.fill(x1, y2, x2, y2 + 1, GSRColorHelper.applyAlpha(0x444444, alpha));
-        context.fill(x1 - 1, y1 - 1, x1, y2 + 1, GSRColorHelper.applyAlpha(0xAAAAAA, alpha));
-        context.fill(x2, y1 - 1, x2 + 1, y2 + 1, GSRColorHelper.applyAlpha(0x444444, alpha));
+        context.fill(x1, y1 + barH, x2, y1 + barH + 1, GSRColorHelper.applyAlpha(0x444444, alpha));
     }
 
-    /**
-     * Handles rotation math and dynamic scaling for structure icons.
-     */
-    private void renderIcon(DrawContext context, MinecraftClient client, int centerX, int y, int targetX, int targetZ, ItemStack stack, int themeColor, float alpha) {
-        var pConfig = GSRConfigPlayer.INSTANCE;
-        float hudScale = pConfig.locateHudScale;
+    @Unique
+    private void renderIcon(DrawContext context, MinecraftClient client, GSRConfigPlayer pConfig, int centerX, int y, int tX, int tZ, ItemStack stack, int themeColor, float alpha) {
+        float hScale = pConfig.locateHudScale;
+        double dX = tX - client.player.getX();
+        double dZ = tZ - client.player.getZ();
+        double distance = Math.sqrt(dX * dX + dZ * dZ);
 
-        double deltaX = targetX - client.player.getX();
-        double deltaZ = targetZ - client.player.getZ();
-        double distance = Math.sqrt(deltaX * deltaX + deltaZ * deltaZ);
+        float angle = MathHelper.wrapDegrees((float) Math.toDegrees(Math.atan2(dZ, dX)) - 90.0f - client.player.getYaw());
+        float maxOff = ((pConfig.barWidth / 2.0f) * hScale) - (9.0f * hScale);
+        float xOff = MathHelper.clamp((angle * (maxOff / 90.0f)), -maxOff, maxOff);
 
-        float angleToTarget = (float) Math.toDegrees(Math.atan2(deltaZ, deltaX)) - 90.0f;
-        float relativeAngle = MathHelper.wrapDegrees(angleToTarget - client.player.getYaw());
+        float drawX = centerX + xOff;
+        float drawY = y + (8.5f * hScale);
 
-        float frameHalfWidth = 9.0f * hudScale;
-        float maxOffset = ((pConfig.barWidth / 2.0f) * hudScale) - frameHalfWidth;
-        float xOffset = MathHelper.clamp((relativeAngle * (maxOffset / 90.0f)), -maxOffset, maxOffset);
+        boolean targeting = Math.abs(angle) < 5.0f;
+        float pulse = targeting ? (float)(Math.sin(client.world.getTime() * 0.3f) * 0.2f + 0.8f) : 0.0f;
 
-        float iconX = (float) centerX + xOffset;
-        float iconY = (float) y + (8.5f * hudScale);
+        // 1. Box Background
+        context.getMatrices().pushMatrix(); // Explicit JOML call
+        context.getMatrices().translate(drawX, drawY);
+        context.getMatrices().scale(hScale, hScale);
 
-        // 1. Render the Background Box (Fixed Size)
-        context.getMatrices().pushMatrix(); // Note: pushMatrix() in older Yarn, push() in newer 1.21
-        context.getMatrices().translate(iconX, iconY);
-        context.getMatrices().scale(hudScale, hudScale);
+        if (targeting) {
+            context.fill(-10, -10, 10, 10, GSRColorHelper.applyAlpha(0xFFFFFF, alpha * pulse));
+        }
+
         context.fill(-9, -9, 9, 9, GSRColorHelper.applyAlpha(themeColor, alpha));
-        context.fill(-8, -8, 8, 8, GSRColorHelper.applyAlpha(0x000000, 0.25f * alpha));
-        context.getMatrices().popMatrix();
+        context.fill(-8, -8, 8, 8, GSRColorHelper.applyAlpha(0x000000, 0.45f * alpha));
+        context.getMatrices().popMatrix(); // Explicit JOML call
 
-// 2. Calculate Item Scale with Safety Clamp
-        float distFactor = MathHelper.clamp((float) (1.0 - (distance / (double)pConfig.maxScaleDistance)), 0.0f, 1.0f);
+        // 2. Icon Scaling
+        float distFactor = MathHelper.clamp((float) (1.0 - (distance / pConfig.maxScaleDistance)), 0.0f, 1.0f);
+        float iconScale = MathHelper.lerp(distFactor, pConfig.MIN_ICON_SCALE, pConfig.MAX_ICON_SCALE) * hScale;
 
-// Determine the distance-based scale
-        float rawScale = MathHelper.lerp(distFactor, pConfig.MIN_ICON_SCALE, pConfig.MAX_ICON_SCALE);
-
-// CRITICAL: Ensure the item (16px) never exceeds the inner box (16px)
-// A scale of 1.0f here means the item is exactly 16x16.
-        float cappedScale = Math.min(rawScale, 1.0f);
-
-// Apply the global HUD scale to the capped item scale
-        float finalIconScale = cappedScale * hudScale;
-
-// 3. Render the Item
         context.getMatrices().pushMatrix();
-        context.getMatrices().translate(iconX, iconY);
-        context.getMatrices().scale(finalIconScale, finalIconScale);
-        context.getMatrices().translate(-8.0f, -8.0f); // Center the 16x16 item
-        context.drawItem(stack, 0, 0);
+        context.getMatrices().translate(drawX, drawY);
+        context.getMatrices().scale(iconScale, iconScale);
+        context.drawItem(stack, -8, -8);
         context.getMatrices().popMatrix();
+
+        // 3. Distance Text (New feature)
+        if (targeting) {
+            TextRenderer tr = client.textRenderer;
+            String distText = (int)distance + "m";
+            float textY = drawY + (10 * hScale);
+            context.getMatrices().pushMatrix();
+            context.getMatrices().translate(drawX, textY);
+            context.getMatrices().scale(hScale * 0.8f, hScale * 0.8f);
+            context.drawTextWithShadow(tr, distText, -tr.getWidth(distText) / 2, 0, GSRColorHelper.applyAlpha(0xFFFFFF, alpha));
+            context.getMatrices().popMatrix();
+        }
     }
 
+    @Unique
     private void renderHorizontalGradient(DrawContext context, int x1, int y1, int x2, int y2, int colorStart, int colorEnd) {
         for (int i = x1; i < x2; i++) {
             float ratio = (float) (i - x1) / (x2 - x1);
-            int color = interpolateColor(colorStart, colorEnd, ratio);
-            context.fill(i, y1, i + 1, y2, color);
+            context.fill(i, y1, i + 1, y2, interpolateColor(colorStart, colorEnd, ratio));
         }
     }
 
+    @Unique
     private int interpolateColor(int color1, int color2, float ratio) {
         int a = (int) MathHelper.lerp(ratio, (color1 >> 24) & 0xFF, (color2 >> 24) & 0xFF);
         int r = (int) MathHelper.lerp(ratio, (color1 >> 16) & 0xFF, (color2 >> 16) & 0xFF);
