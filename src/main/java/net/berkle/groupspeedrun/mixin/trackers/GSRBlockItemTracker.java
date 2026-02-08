@@ -19,13 +19,11 @@ public abstract class GSRBlockItemTracker {
      */
     @Inject(method = "place(Lnet/minecraft/item/ItemPlacementContext;)Lnet/minecraft/util/ActionResult;", at = @At("RETURN"))
     private void onBlockPlace(ItemPlacementContext context, CallbackInfoReturnable<ActionResult> cir) {
-        // Safety check for timer state
-        if (GSRMain.CONFIG == null || GSRMain.CONFIG.isTimerFrozen) return;
-
-        // isAccepted() covers SUCCESS, CONSUME, and SUCCESS_NO_ITEM_USAGE
-        if (context.getWorld() != null && !context.getWorld().isClient() && cir.getReturnValue().isAccepted()) {
-            if (context.getPlayer() != null) {
-                GSRStats.BLOCKS_PLACED.merge(context.getPlayer().getUuid(), 1, Integer::sum);
+        // Use the centralized helper!
+        // This ensures 'isDirty' becomes true and the stats actually save to disk.
+        if (context.getPlayer() != null && cir.getReturnValue().isAccepted()) {
+            if (!context.getWorld().isClient()) {
+                GSRStats.addInt(GSRStats.BLOCKS_PLACED, context.getPlayer().getUuid(), 1);
             }
         }
     }

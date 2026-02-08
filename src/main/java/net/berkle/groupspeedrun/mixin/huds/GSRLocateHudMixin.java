@@ -1,9 +1,10 @@
 package net.berkle.groupspeedrun.mixin.huds;
 
-import net.berkle.groupspeedrun.config.GSRConfig;
 import net.berkle.groupspeedrun.GSRMain;
+import net.berkle.groupspeedrun.config.GSRConfigPlayer;
+import net.berkle.groupspeedrun.mixin.accessors.BossBarHudAccessor; // NEW IMPORT
 import net.berkle.groupspeedrun.util.GSRColorHelper;
-import net.berkle.groupspeedrun.util.GSRTimerHudState;
+import net.berkle.groupspeedrun.util.GSRAlphaUtil;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.hud.InGameHud;
@@ -29,22 +30,17 @@ public class GSRLocateHudMixin {
         var config = GSRMain.CONFIG;
         if (config == null || config.startTime < 0) return;
 
-        // --- SHARED FADE LOGIC ---
-        // This line pulls the alpha value which includes:
-        // 1. The 10-second Split Pop-up
-        // 2. The Tab-key held animation
-        // 3. The Victory/Fail end-of-run display
+        var pConfig = GSRConfigPlayer.INSTANCE;
+
+        // --- FADE & VISIBILITY LOGIC ---
         boolean isFinished = config.wasVictorious || config.isFailed;
         long ticksSinceEnd = client.world.getTime() - config.frozenTime;
-        float fadeAlpha = GSRTimerHudState.getFadeAlpha(client, config, isFinished, ticksSinceEnd);
+        float fadeAlpha = GSRAlphaUtil.getFadeAlpha(client, config, isFinished, ticksSinceEnd);
 
-        // If the state manager says we're invisible, stop immediately
         if (fadeAlpha <= 0.01f) return;
-        // -------------------------
 
         RegistryKey<World> currentDim = client.world.getRegistryKey();
 
-        // Check if any structures are currently active in the player's current dimension
         boolean showFortress = config.fortressActive && currentDim == World.NETHER;
         boolean showBastion = config.bastionActive && currentDim == World.NETHER;
         boolean showStronghold = config.strongholdActive && currentDim == World.OVERWORLD;
@@ -52,15 +48,34 @@ public class GSRLocateHudMixin {
 
         if (!showFortress && !showBastion && !showStronghold && !showShip) return;
 
-        // Calculate screen positions
+        // --- UI POSITIONING ---
         int centerX = context.getScaledWindowWidth() / 2;
         int screenH = context.getScaledWindowHeight();
-        int y = config.locateHudOnTop ? 15 : (screenH - 70);
 
-        // Draw the background horizontal compass bar
+        int y;
+        if (pConfig.locateHudOnTop) {
+            // Start with a base 15px margin from the top
+            int topOffset = 15;
+
+            // Cast the BossBarHud to our Accessor interface
+            var bossBarHud = client.inGameHud.getBossBarHud();
+            var activeBars = ((BossBarHudAccessor) bossBarHud).getGSRBossBars();
+
+            if (!activeBars.isEmpty()) {
+                // Each vanilla boss bar is roughly 19px high including spacing
+                // We shift down based on the number of bars + extra 5px buffer
+                topOffset += (activeBars.size() * 19);
+            }
+            y = topOffset;
+        } else {
+            // Bottom position (above hotbar/experience bar)
+            y = screenH - 70;
+        }
+
+        // Render the base tracking bar
         renderTrackingBar(context, centerX, y, fadeAlpha);
 
-        // Render each active icon on the bar
+        // Render active icons
         if (showFortress) {
             renderIcon(context, client, centerX, y, config.fortressX, config.fortressZ,
                     new ItemStack(Items.BLAZE_ROD), config.getFortressColorInt(), fadeAlpha);
@@ -80,26 +95,24 @@ public class GSRLocateHudMixin {
     }
 
     /**
-     * Draws the main horizontal bar that acts as a compass track.
+     * Renders the horizontal compass bar background and borders.
      */
     private void renderTrackingBar(DrawContext context, int centerX, int y, float alpha) {
-        var config = GSRMain.CONFIG;
-        float hudScale = config.locateHudScale;
-        int halfWidth = (int) ((config.barWidth / 2.0) * hudScale);
-        int barHeight = (int) (config.barHeight * hudScale);
+        var pConfig = GSRConfigPlayer.INSTANCE;
+        float hudScale = pConfig.locateHudScale;
+        int halfWidth = (int) ((pConfig.barWidth / 2.0) * hudScale);
+        int barHeight = (int) (pConfig.barHeight * hudScale);
 
         int x1 = centerX - halfWidth;
         int x2 = centerX + halfWidth;
         int y1 = y + 7;
         int y2 = y1 + barHeight;
 
-        // Main background and gradient center
         context.fill(x1, y1, x2, y2, GSRColorHelper.applyAlpha(0x000000, alpha));
         renderHorizontalGradient(context, x1, y1, x2, y2,
                 GSRColorHelper.applyAlpha(0x333333, alpha),
                 GSRColorHelper.applyAlpha(0x444444, alpha));
 
-        // Dimensional borders (Gray tones)
         context.fill(x1, y1 - 1, x2, y1, GSRColorHelper.applyAlpha(0xAAAAAA, alpha));
         context.fill(x1, y2, x2, y2 + 1, GSRColorHelper.applyAlpha(0x444444, alpha));
         context.fill(x1 - 1, y1 - 1, x1, y2 + 1, GSRColorHelper.applyAlpha(0xAAAAAA, alpha));
@@ -107,13 +120,12 @@ public class GSRLocateHudMixin {
     }
 
     /**
-     * Calculates the position of a structure icon on the bar based on player rotation (Yaw).
+     * Handles rotation math and dynamic scaling for structure icons.
      */
     private void renderIcon(DrawContext context, MinecraftClient client, int centerX, int y, int targetX, int targetZ, ItemStack stack, int themeColor, float alpha) {
-        var config = GSRMain.CONFIG;
-        float hudScale = config.locateHudScale;
+        var pConfig = GSRConfigPlayer.INSTANCE;
+        float hudScale = pConfig.locateHudScale;
 
-        // 1. Position Math (Clamped to bar interior)
         double deltaX = targetX - client.player.getX();
         double deltaZ = targetZ - client.player.getZ();
         double distance = Math.sqrt(deltaX * deltaX + deltaZ * deltaZ);
@@ -122,51 +134,30 @@ public class GSRLocateHudMixin {
         float relativeAngle = MathHelper.wrapDegrees(angleToTarget - client.player.getYaw());
 
         float frameHalfWidth = 9.0f * hudScale;
-        float maxOffset = ((config.barWidth / 2.0f) * hudScale) - frameHalfWidth;
+        float maxOffset = ((pConfig.barWidth / 2.0f) * hudScale) - frameHalfWidth;
         float xOffset = MathHelper.clamp((relativeAngle * (maxOffset / 90.0f)), -maxOffset, maxOffset);
 
         float iconX = (float) centerX + xOffset;
         float iconY = (float) y + (8.5f * hudScale);
 
-        // --- Render Background Frame (Fixed Size) ---
         context.getMatrices().pushMatrix();
         context.getMatrices().translate(iconX, iconY);
         context.getMatrices().scale(hudScale, hudScale);
-
-        int themed = GSRColorHelper.applyAlpha(themeColor, alpha);
-        int bg = GSRColorHelper.applyAlpha(0x000000, 0.25f * alpha);
-
-        context.fill(-9, -9, 9, 9, themed);
-        context.fill(-8, -8, 8, 8, bg);
+        context.fill(-9, -9, 9, 9, GSRColorHelper.applyAlpha(themeColor, alpha));
+        context.fill(-8, -8, 8, 8, GSRColorHelper.applyAlpha(0x000000, 0.25f * alpha));
         context.getMatrices().popMatrix();
 
-        // --- Render Scaled Item (Proportional to Frame) ---
-        // distFactor: 0.0 at max distance, 1.0 at 0 blocks
-        float distFactor = MathHelper.clamp((float) (1.0 - (distance / (double)config.maxScaleDistance)), 0.0f, 1.0f);
-
-        /**
-         * Scaling Logic:
-         * Min scale: 0.5f (Small icon inside the box)
-         * Max scale: 1.0f (Standard size, fits perfectly in the 18x18 frame)
-         * We multiply by hudScale at the end to respect the user's global settings.
-         */
-        float minInternalScale = 0.5f;
-        float maxInternalScale = 1.0f;
-        float finalIconScale = MathHelper.lerp(distFactor, minInternalScale, maxInternalScale) * hudScale;
+        float distFactor = MathHelper.clamp((float) (1.0 - (distance / (double)pConfig.maxScaleDistance)), 0.0f, 1.0f);
+        float finalIconScale = MathHelper.lerp(distFactor, pConfig.MIN_ICON_SCALE, pConfig.MAX_ICON_SCALE) * hudScale;
 
         context.getMatrices().pushMatrix();
         context.getMatrices().translate(iconX, iconY);
         context.getMatrices().scale(finalIconScale, finalIconScale);
-        context.getMatrices().translate(-8.0f, -8.0f); // Centers the 16x16 item
-
+        context.getMatrices().translate(-8.0f, -8.0f);
         context.drawItem(stack, 0, 0);
         context.getMatrices().popMatrix();
     }
 
-    /**
-     * Loops through pixels to create a custom horizontal gradient since DrawContext
-     * default gradients are usually vertical.
-     */
     private void renderHorizontalGradient(DrawContext context, int x1, int y1, int x2, int y2, int colorStart, int colorEnd) {
         for (int i = x1; i < x2; i++) {
             float ratio = (float) (i - x1) / (x2 - x1);
@@ -175,9 +166,6 @@ public class GSRLocateHudMixin {
         }
     }
 
-    /**
-     * Color interpolation helper to blend two ARGB colors.
-     */
     private int interpolateColor(int color1, int color2, float ratio) {
         int a = (int) MathHelper.lerp(ratio, (color1 >> 24) & 0xFF, (color2 >> 24) & 0xFF);
         int r = (int) MathHelper.lerp(ratio, (color1 >> 16) & 0xFF, (color2 >> 16) & 0xFF);

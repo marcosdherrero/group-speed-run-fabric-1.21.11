@@ -1,9 +1,10 @@
 package net.berkle.groupspeedrun.mixin.trackers;
 
 import net.berkle.groupspeedrun.GSRMain;
-import net.berkle.groupspeedrun.GSREvents;
-import net.berkle.groupspeedrun.GSRRunHistoryManager;
+import net.berkle.groupspeedrun.managers.GSRRunHistoryManager;
+import net.berkle.groupspeedrun.managers.GSRSplitManager;
 import net.minecraft.entity.boss.dragon.EnderDragonEntity;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.world.ServerWorld;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
@@ -14,39 +15,35 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public abstract class GSRDragonDeathTracker {
 
     /**
-     * updatePostDeath is called every tick once health <= 0.
-     * We trigger victory on the very first tick of this animation.
+     * updatePostDeath is called every tick once the Dragon's health reaches zero.
+     * This Mixin captures the exact moment the victory occurs.
      */
     @Inject(method = "updatePostDeath", at = @At("HEAD"))
     private void groupspeedrun$onDragonDeathAnimation(CallbackInfo ci) {
         EnderDragonEntity dragon = (EnderDragonEntity) (Object) this;
 
-        // Ensure we are on the server
+        // Ensure we are on the server side and config exists
         if (dragon.getEntityWorld().isClient() || GSRMain.CONFIG == null) return;
 
-        // CRITICAL: Only trigger if health is 0 AND it hasn't been triggered yet
+        // Logic check: health must be zero, and we must not have already ended the run
         if (dragon.getHealth() <= 0.0f && !GSRMain.CONFIG.wasVictorious && !GSRMain.CONFIG.isFailed) {
-            triggerVictory((ServerWorld) dragon.getEntityWorld());
+            MinecraftServer server = dragon.getEntityWorld().getServer();
+            if (server != null) {
+                triggerVictory(server);
+            }
         }
     }
 
-    private void triggerVictory(ServerWorld world) {
-        var config = GSRMain.CONFIG;
-        long currentWorldTime = world.getTime();
+    private void triggerVictory(MinecraftServer server) {
+        // 1. Trigger the Split Logic
+        // This handles the Chat Broadcast, Sound, and pinning the timeDragon variable.
+        GSRSplitManager.completeSplit(server, "Dragon");
 
-        // 1. PIN THE CLOCK
-        config.wasVictorious = true;
-        config.isTimerFrozen = true;
-        config.frozenTime = currentWorldTime; // This is what GSREvents uses to stop the clock
+        // 2. Additional Run Persistence
+        // Log the final success state into the JSON run history.
+        GSRRunHistoryManager.saveRun(server, "SUCCESS", "The Group", "Ender Dragon Defeated");
 
-        // 2. CALCULATE FINAL TIME
-        config.timeDragon = GSREvents.getRunTicks(world.getServer());
-        config.victoryTimer = 200;
-
-        // 3. PERSIST
-        GSRRunHistoryManager.saveRun(world.getServer(), "SUCCESS", "", "");
-        GSRMain.saveAndSync(world.getServer());
-
-        GSRMain.LOGGER.info("[GSR] VICTORY! Timer stopped at: " + config.timeDragon);
+        // 3. Log to Console for debugging
+        GSRMain.LOGGER.info("[GSR] Victory condition met! Timer finalized and broadcast sent.");
     }
 }

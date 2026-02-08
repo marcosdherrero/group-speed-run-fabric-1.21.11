@@ -10,26 +10,23 @@ import java.nio.file.Path;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CompletableFuture;
 
 /**
- * Manages tracking and persistence of player statistics throughout a run.
- * These stats are used to determine end-of-run awards (e.g., "Dragon Warrior").
- * * Uses ConcurrentHashMaps to ensure thread-safety, as stats can be updated
- * from multiple threads (e.g., block breaking and entity ticking).
+ * Manages tracking and persistence of player statistics.
+ * WORLD-SPECIFIC: Stats are stored inside each world's save folder (data/gsr_stats.json).
+ * ASYNC: Snapshotting happens on the main thread, while I/O happens on a background thread.
  */
 public class GSRStats {
 
-    /**
-     * Required for GSON to correctly handle Map keys that are objects (UUIDs)
-     * rather than simple Strings.
-     */
     private static final Gson GSON = new GsonBuilder()
             .enableComplexMapKeySerialization()
             .setPrettyPrinting()
             .create();
 
-    // --- [ STATISTICAL MAPS ] ---
-    // Using ConcurrentHashMap to prevent ConcurrentModificationExceptions during autosaves
+    private static volatile boolean isDirty = false;
+
+    // --- [ STATS MAPS ] ---
     public static Map<UUID, Integer> INVENTORIES_OPENED = new ConcurrentHashMap<>();
     public static Map<UUID, Integer> BLOCKS_PLACED = new ConcurrentHashMap<>();
     public static Map<UUID, Integer> BLOCKS_BROKEN = new ConcurrentHashMap<>();
@@ -40,9 +37,13 @@ public class GSRStats {
     public static Map<UUID, Integer> POTIONS_DRUNK = new ConcurrentHashMap<>();
     public static Map<UUID, Integer> MAX_ARMOR_RATING = new ConcurrentHashMap<>();
 
+    // High-precision trackers that replace unreliable vanilla stats
+    public static Map<UUID, Float> TOTAL_DAMAGE_DEALT = new ConcurrentHashMap<>();
+    public static Map<UUID, Float> TOTAL_DAMAGE_TAKEN = new ConcurrentHashMap<>();
+    public static Map<UUID, Float> DISTANCE_MOVED = new ConcurrentHashMap<>();
+
     /**
-     * Resets all statistical data to zero/empty.
-     * Called by GSRMain when a world starts or by GSRCommands on a manual reset.
+     * Clears all tracking maps. Called when a new run starts.
      */
     public static void reset() {
         INVENTORIES_OPENED.clear();
@@ -54,71 +55,84 @@ public class GSRStats {
         POG_CHAMP_COUNT.clear();
         POTIONS_DRUNK.clear();
         MAX_ARMOR_RATING.clear();
-        GSRMain.LOGGER.info("[GSR] Statistics have been cleared.");
+        TOTAL_DAMAGE_DEALT.clear();
+        TOTAL_DAMAGE_TAKEN.clear();
+        DISTANCE_MOVED.clear();
+
+        isDirty = false;
+        GSRMain.LOGGER.info("[GSR] Statistics have been reset.");
     }
 
-    // --- [ ATOMIC HELPERS ] ---
+    // --- [ STAT UPDATE HELPERS ] ---
 
-    /**
-     * Increments an integer stat for a player.
-     */
     public static void addInt(Map<UUID, Integer> map, UUID uuid, int amount) {
         if (uuid == null || amount == 0) return;
         map.merge(uuid, amount, Integer::sum);
+        isDirty = true;
     }
 
-    /**
-     * Increments a float stat for a player (used for damage and healing).
-     */
     public static void addFloat(Map<UUID, Float> map, UUID uuid, float amount) {
         if (uuid == null || amount <= 0.0f) return;
         map.merge(uuid, amount, Float::sum);
+        isDirty = true;
+        // System.out.println("[GSR-Debug] Stat Updated. New Total: " + map.get(uuid));
     }
 
-    /**
-     * Updates the highest armor value recorded for a player.
-     */
     public static void updateMaxArmor(UUID uuid, int currentArmor) {
         if (uuid == null) return;
         MAX_ARMOR_RATING.merge(uuid, currentArmor, Math::max);
+        isDirty = true;
     }
 
-    // --- [ PERSISTENCE ] ---
+    // --- [ PERSISTENCE LOGIC ] ---
 
-    /**
-     * Saves all current stats to 'gsr_stats.json' in the world folder.
-     */
     public static void save(MinecraftServer server) {
-        if (server == null) return;
+        if (server == null || !isDirty) return;
+
+        // Snapshot data on main thread to prevent ConcurrentModificationException during save
+        StatsContainer snapshot = new StatsContainer(
+                Map.copyOf(INVENTORIES_OPENED),
+                Map.copyOf(BLOCKS_PLACED),
+                Map.copyOf(BLOCKS_BROKEN),
+                Map.copyOf(DAMAGE_HEALED),
+                Map.copyOf(DRAGON_DAMAGE_MAP),
+                Map.copyOf(LAST_BLAZE_KILL_TIME),
+                Map.copyOf(POG_CHAMP_COUNT),
+                Map.copyOf(POTIONS_DRUNK),
+                Map.copyOf(MAX_ARMOR_RATING),
+                Map.copyOf(TOTAL_DAMAGE_DEALT),
+                Map.copyOf(TOTAL_DAMAGE_TAKEN),
+                Map.copyOf(DISTANCE_MOVED)
+        );
 
         File file = getStatsFile(server);
-        try (Writer writer = new FileWriter(file)) {
-            // Package maps into a record for clean JSON structure
-            StatsContainer container = new StatsContainer(
-                    INVENTORIES_OPENED, BLOCKS_PLACED, BLOCKS_BROKEN,
-                    DAMAGE_HEALED, DRAGON_DAMAGE_MAP, LAST_BLAZE_KILL_TIME,
-                    POG_CHAMP_COUNT, POTIONS_DRUNK, MAX_ARMOR_RATING
-            );
-            GSON.toJson(container, writer);
-        } catch (IOException e) {
-            GSRMain.LOGGER.error("[GSR] Failed to save stats file!", e);
-        }
+        isDirty = false;
+
+        CompletableFuture.runAsync(() -> {
+            if (file.getParentFile() != null) file.getParentFile().mkdirs();
+
+            try (Writer writer = new OutputStreamWriter(new FileOutputStream(file), "UTF-8")) {
+                GSON.toJson(snapshot, writer);
+            } catch (IOException e) {
+                GSRMain.LOGGER.error("[GSR] Async stats save failed!", e);
+                isDirty = true; // Retry on next save tick
+            }
+        });
     }
 
-    /**
-     * Loads stats from the world folder to resume a run's statistics.
-     */
     public static void load(MinecraftServer server) {
         if (server == null) return;
 
         File file = getStatsFile(server);
-        if (!file.exists()) return;
+        if (!file.exists()) {
+            reset();
+            return;
+        }
 
-        try (Reader reader = new FileReader(file)) {
+        try (Reader reader = new InputStreamReader(new FileInputStream(file), "UTF-8")) {
             StatsContainer container = GSON.fromJson(reader, StatsContainer.class);
             if (container != null) {
-                reset(); // Clear memory before populating from file
-
+                reset();
                 if (container.inventoriesOpened != null) INVENTORIES_OPENED.putAll(container.inventoriesOpened);
                 if (container.blocksPlaced != null) BLOCKS_PLACED.putAll(container.blocksPlaced);
                 if (container.blocksBroken != null) BLOCKS_BROKEN.putAll(container.blocksBroken);
@@ -128,26 +142,23 @@ public class GSRStats {
                 if (container.pogCount != null) POG_CHAMP_COUNT.putAll(container.pogCount);
                 if (container.potionsDrunk != null) POTIONS_DRUNK.putAll(container.potionsDrunk);
                 if (container.maxArmorRating != null) MAX_ARMOR_RATING.putAll(container.maxArmorRating);
+                if (container.totalDamageDealt != null) TOTAL_DAMAGE_DEALT.putAll(container.totalDamageDealt);
+                if (container.totalDamageTaken != null) TOTAL_DAMAGE_TAKEN.putAll(container.totalDamageTaken);
+                if (container.distanceMoved != null) DISTANCE_MOVED.putAll(container.distanceMoved);
 
-                GSRMain.LOGGER.info("[GSR] Successfully loaded stats for {} players.", INVENTORIES_OPENED.size());
+                isDirty = false;
+                GSRMain.LOGGER.info("[GSR] Stats successfully loaded.");
             }
-        } catch (IOException e) {
-            GSRMain.LOGGER.error("[GSR] Failed to load stats file!", e);
+        } catch (Exception e) {
+            GSRMain.LOGGER.error("[GSR] Failed to load statistics!", e);
         }
     }
 
-    /**
-     * Helper to resolve the stats file path.
-     */
     private static File getStatsFile(MinecraftServer server) {
-        Path path = server.getSavePath(WorldSavePath.ROOT).resolve("gsr_stats.json");
+        Path path = server.getSavePath(WorldSavePath.ROOT).resolve("data").resolve("gsr_stats.json");
         return path.toFile();
     }
 
-    /**
-     * Data transfer object for GSON serialization.
-     * Uses names that result in clean, readable JSON keys.
-     */
     private record StatsContainer(
             Map<UUID, Integer> inventoriesOpened,
             Map<UUID, Integer> blocksPlaced,
@@ -157,6 +168,9 @@ public class GSRStats {
             Map<UUID, Long> blazeKills,
             Map<UUID, Integer> pogCount,
             Map<UUID, Integer> potionsDrunk,
-            Map<UUID, Integer> maxArmorRating
+            Map<UUID, Integer> maxArmorRating,
+            Map<UUID, Float> totalDamageDealt,
+            Map<UUID, Float> totalDamageTaken,
+            Map<UUID, Float> distanceMoved
     ) {}
 }

@@ -22,13 +22,15 @@ public class GSRServerPlayerInterTracker {
      */
     @Inject(method = "tryBreakBlock", at = @At("RETURN"))
     private void afterBlockBroken(BlockPos pos, CallbackInfoReturnable<Boolean> cir) {
-        // Only count if the block was successfully broken (logic returned true)
-        if (cir.getReturnValue() && player != null) {
+        // 1. Success Check: Only count if the block was actually broken
+        if (!cir.getReturnValue() || player == null) return;
 
-            // Check global config and timer state via the new GSRMain
-            if (GSRMain.CONFIG != null && !GSRMain.CONFIG.isTimerFrozen) {
-                GSRStats.BLOCKS_BROKEN.merge(player.getUuid(), 1, Integer::sum);
-            }
+        // 2. State Check: Only track if the run is active and not paused
+        if (GSRMain.CONFIG == null || GSRMain.CONFIG.isTimerFrozen || GSRMain.CONFIG.startTime < 0) {
+            return;
         }
+
+        // 3. Persistence: Use the helper to mark the stats as 'dirty' for the next save cycle
+        GSRStats.addInt(GSRStats.BLOCKS_BROKEN, player.getUuid(), 1);
     }
 }

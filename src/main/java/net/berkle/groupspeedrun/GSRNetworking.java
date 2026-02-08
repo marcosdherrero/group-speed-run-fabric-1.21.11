@@ -1,48 +1,40 @@
 package net.berkle.groupspeedrun;
 
-import com.google.gson.Gson;
 import net.berkle.groupspeedrun.config.GSRConfigPayload;
+import net.fabricmc.fabric.api.networking.v1.PlayerLookup;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
+import net.minecraft.nbt.NbtCompound;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 
 /**
- * Handles the distribution of configuration data from the server to clients.
- * Uses JSON serialization to ensure all speedrun state (timer, health, locators)
- * is synchronized across the entire group.
+ * Optimized networking manager.
+ * Uses native NBT conversion to reduce CPU spikes during synchronization.
  */
 public class GSRNetworking {
-    private static final Gson GSON = new Gson();
 
     /**
-     * Broadcasts the current server configuration to every player currently online.
-     * Best used for global state changes like timer starts, resets, or structure discoveries.
-     * * @param server The MinecraftServer instance.
+     * Broadcasts state to all players.
+     * Snapshot is created once to save CPU cycles.
      */
     public static void syncConfigWithAll(MinecraftServer server) {
         if (server == null || GSRMain.CONFIG == null) return;
 
-        // Convert the current state to a JSON string for the payload
-        String json = GSON.toJson(GSRMain.CONFIG);
-        GSRConfigPayload payload = new GSRConfigPayload(json);
+        // Create the NBT snapshot once for the entire broadcast
+        NbtCompound nbt = new NbtCompound();
+        GSRMain.CONFIG.writeNbt(nbt); // We use a native writer method
+        GSRConfigPayload payload = new GSRConfigPayload(nbt);
 
-        // Iterate and send to all connected clients
-        for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
+        for (ServerPlayerEntity player : PlayerLookup.all(server)) {
             ServerPlayNetworking.send(player, payload);
         }
     }
 
-    /**
-     * Sends the current configuration to a specific player.
-     * Crucial for syncing players as they log in so their HUD is not out of date.
-     * * @param player The specific ServerPlayerEntity to sync.
-     */
     public static void syncConfigWithPlayer(ServerPlayerEntity player) {
         if (player == null || GSRMain.CONFIG == null) return;
 
-        String json = GSON.toJson(GSRMain.CONFIG);
-        GSRConfigPayload payload = new GSRConfigPayload(json);
-
-        ServerPlayNetworking.send(player, payload);
+        NbtCompound nbt = new NbtCompound();
+        GSRMain.CONFIG.writeNbt(nbt);
+        ServerPlayNetworking.send(player, new GSRConfigPayload(nbt));
     }
 }

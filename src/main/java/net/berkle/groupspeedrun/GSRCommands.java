@@ -2,8 +2,11 @@ package net.berkle.groupspeedrun;
 
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.FloatArgumentType;
+import com.mojang.brigadier.tree.LiteralCommandNode;
 import com.mojang.datafixers.util.Pair;
-import net.berkle.groupspeedrun.config.GSRConfig;
+import net.berkle.groupspeedrun.config.GSRConfigPlayer;
+import net.berkle.groupspeedrun.config.GSRConfigWorld;
+import net.berkle.groupspeedrun.managers.GSRBroadcastManager;
 import net.minecraft.advancement.AdvancementProgress;
 import net.minecraft.advancement.PlayerAdvancementTracker;
 import net.minecraft.registry.RegistryKeys;
@@ -14,7 +17,6 @@ import net.minecraft.server.command.CommandManager;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
-import net.minecraft.stat.Stats;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.GameMode;
@@ -23,286 +25,223 @@ import net.minecraft.world.gen.structure.StructureKeys;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.ArrayList;
-import java.util.List;
-
 import static net.minecraft.server.command.CommandManager.literal;
 import static net.minecraft.server.command.CommandManager.argument;
 
+/**
+ * Main command handling class for Group Speedrun (GSR).
+ * Handles run control, global settings, player-specific HUD preferences, and structure locators.
+ */
 public class GSRCommands {
     private static final Logger LOGGER = LoggerFactory.getLogger("GSR-Commands");
 
     public static void register(CommandDispatcher<ServerCommandSource> dispatcher) {
-        dispatcher.register(literal("gsr")
+        // We capture the node, so the semicolon goes at the very end of the builder chain.
+        LiteralCommandNode<ServerCommandSource> gsrRoot = dispatcher.register(literal("gsr")
                 .requires(source -> CommandManager.ALWAYS_PASS_CHECK.allows(source.getPermissions()))
 
-                // --- STATUS COMMAND ---
-                // Requirements NONE
-                .then(literal("status")
-                        .requires(source -> CommandManager.ALWAYS_PASS_CHECK.allows(source.getPermissions()))
-                        .executes(context -> {
-                            var config = GSRMain.CONFIG;
-                            String hud = switch (config.hudMode) {
-                                case 0 -> "§aALWAYS VISIBLE";
-                                case 1 -> "§bTAB ONLY";
-                                default -> "§cHIDDEN";
-                            };
-                            context.getSource().sendFeedback(() -> Text.literal(
-                                    "§6§l[GSR] Status:\n" +
-                                            "§f- HUD Mode: " + hud + "\n" +
-                                            "§f- Group Death: " + (config.groupDeathEnabled ? "§aON" : "§cOFF") + "\n" +
-                                            "§f- Shared HP: " + (config.sharedHealthEnabled ? "§aON" : "§cOFF") + "\n" +
-                                            "§f- Max Hearts: §c" + config.maxHearts
-                            ), false);
-                            return 1;
-                        }))
+                // --- ROOT: STATS & STATUS ---
+                .then(literal("stats").executes(context -> {
+                    var config = GSRMain.CONFIG;
+                    if (config == null || config.startTime < 0) {
+                        context.getSource().sendError(Text.literal("No active run found."));
+                        return 0;
+                    }
+                    GSRBroadcastManager.broadcastLiveStats(context.getSource().getServer());
+                    return 1;
+                }))
+                .then(literal("status").executes(context -> {
+                    displayStatus(context.getSource());
+                    return 1;
+                }))
 
-                // --- LIVE STATS DATA FRAME ---
-                // Requirements NONE
-                .then(literal("stats")
-                        .requires(source -> CommandManager.ALWAYS_PASS_CHECK.allows(source.getPermissions()))
-                        .executes(context -> {
-                            var config = GSRMain.CONFIG;
-                            if (config == null || config.startTime < 0) {
-                                context.getSource().sendError(Text.literal("No active run found."));
-                                return 0;
-                            }
-
-                            var pm = context.getSource().getServer().getPlayerManager();
-                            var players = pm.getPlayerList();
-
-                            // Table Header: TAG | PLAYER | TYPE | VALUE
-                            pm.broadcast(Text.literal("§8----------------------------------------------------------"), false);
-
-                            // Record to hold our schema definition
-                            record StatRow(String type, String label, java.util.function.ToDoubleFunction<ServerPlayerEntity> extractor) {}
-
-                            List<StatRow> schema = new ArrayList<>();
-                            schema.add(new StatRow("combat", "DragonWarrior", p -> (double) GSRStats.DRAGON_DAMAGE_MAP.getOrDefault(p.getUuid(), 0f)));
-                            schema.add(new StatRow("combat", "ADC", p -> (double) p.getStatHandler().getStat(Stats.CUSTOM.getOrCreateStat(Stats.DAMAGE_DEALT)) / 10.0));
-                            schema.add(new StatRow("combat", "Killer", p -> (double) p.getStatHandler().getStat(Stats.CUSTOM.getOrCreateStat(Stats.MOB_KILLS))));
-                            schema.add(new StatRow("utility", "BrewMaster", p -> (double) GSRStats.POTIONS_DRUNK.getOrDefault(p.getUuid(), 0)));
-                            schema.add(new StatRow("utility", "Builder", p -> (double) (GSRStats.BLOCKS_BROKEN.getOrDefault(p.getUuid(), 0) + GSRStats.BLOCKS_PLACED.getOrDefault(p.getUuid(), 0))));
-                            schema.add(new StatRow("support", "Healer", p -> (double) GSRStats.DAMAGE_HEALED.getOrDefault(p.getUuid(), 0f) / 2.0));
-                            schema.add(new StatRow("utility", "PogChamp", p -> (double) GSRStats.POG_CHAMP_COUNT.getOrDefault(p.getUuid(), 0)));
-                            schema.add(new StatRow("combat", "Defender", p -> (double) GSRStats.MAX_ARMOR_RATING.getOrDefault(p.getUuid(), 0)));
-                            schema.add(new StatRow("travel", "Sightseer", p -> (double) p.getStatHandler().getStat(Stats.CUSTOM.getOrCreateStat(Stats.WALK_ONE_CM)) / 100.0));
-                            schema.add(new StatRow("combat", "Tank", p -> (double) p.getStatHandler().getStat(Stats.CUSTOM.getOrCreateStat(Stats.DAMAGE_TAKEN)) / 10.0));
-
-                            for (StatRow stat : schema) {
-                                for (ServerPlayerEntity player : players) {
-                                    double val = stat.extractor.applyAsDouble(player);
-
-                                    if (val > 0) {
-                                        String rawName = player.getName().getString();
-                                        // Truncate/Pad Name to 10 chars
-                                        String playerName = rawName.length() > 10 ? rawName.substring(0, 10) : String.format("%-10s", rawName);
-
-                                        // Format the numeric value
-                                        String fVal = (val == (long) val) ? String.format("%d", (long) val) : String.format("%.1f", val);
-
-                                        // Row Construction: TAG (14) | PLAYER (10) | TYPE (12) | VALUE
-                                        String row = String.format("§b%-14s | §f%s | §e%-12s | §a%s",
-                                                stat.label, playerName, stat.type, fVal);
-
-                                        pm.broadcast(Text.literal(row), false);
-                                    }
-                                }
-                            }
-
-                            pm.broadcast(Text.literal("§8----------------------------------------------------------"), false);
-                            return 1;
-                        }))
-
-                // --- GAMEPLAY TOGGLES (Shared Health & Group Death) ---
-                // Requirements ADMIN
-                .then(literal("toggle_shared_hp")
+                // --- BRANCH: RUN CONTROL ---
+                .then(literal("pause")
                         .requires(source -> CommandManager.ADMINS_CHECK.allows(source.getPermissions()))
+                        .executes(context -> togglePause(context.getSource(), true)))
+                .then(literal("resume")
+                        .requires(source -> CommandManager.ADMINS_CHECK.allows(source.getPermissions()))
+                        .executes(context -> togglePause(context.getSource(), false)))
+                .then(literal("reset")
+                        .requires(source -> {
+                            var config = GSRMain.CONFIG;
+                            return CommandManager.ADMINS_CHECK.allows(source.getPermissions()) ||
+                                    (config != null && (config.isFailed || config.wasVictorious));
+                        })
                         .executes(context -> {
+                            executeReset(context.getSource().getServer());
+                            context.getSource().sendFeedback(() -> Text.literal("§6[GSR] §aRun has been fully reset!"), true);
+                            return 1;
+                        }))
+
+                // --- BRANCH: SETTINGS ---
+                .then(literal("settings")
+                        .requires(source -> CommandManager.ADMINS_CHECK.allows(source.getPermissions()))
+                        .then(literal("shared_hp_toggle").executes(context -> {
                             GSRMain.CONFIG.sharedHealthEnabled = !GSRMain.CONFIG.sharedHealthEnabled;
                             GSRMain.saveAndSync(context.getSource().getServer());
                             String state = GSRMain.CONFIG.sharedHealthEnabled ? "§aON" : "§cOFF";
                             context.getSource().sendFeedback(() -> Text.literal("§6[GSR] Shared Health: " + state), true);
                             return 1;
                         }))
-
-                // Requirements ADMIN
-                .then(literal("toggle_group_death")
-                        .requires(source -> CommandManager.ADMINS_CHECK.allows(source.getPermissions()))
-                        .executes(context -> {
+                        .then(literal("group_death_toggle").executes(context -> {
                             GSRMain.CONFIG.groupDeathEnabled = !GSRMain.CONFIG.groupDeathEnabled;
                             GSRMain.saveAndSync(context.getSource().getServer());
                             String state = GSRMain.CONFIG.groupDeathEnabled ? "§aON" : "§cOFF";
                             context.getSource().sendFeedback(() -> Text.literal("§6[GSR] Group Death: " + state), true);
                             return 1;
                         }))
+                        .then(literal("max_hp")
+                                .then(argument("amount", FloatArgumentType.floatArg(0.5f, 100.0f))
+                                        .executes(context -> {
+                                            float val = FloatArgumentType.getFloat(context, "amount");
+                                            updateMaxHearts(context.getSource().getServer(), val);
+                                            context.getSource().sendFeedback(() -> Text.literal("§6[GSR] Global Max Health: §f" + val), true);
+                                            return 1;
+                                        }))))
 
-                // --- SET MAX HEALTH (Defaults to 10 if no value provided) ---
-                // Requirements None
-                .then(literal("set_max_hp")
-                        .requires(source -> CommandManager.ADMINS_CHECK.allows(source.getPermissions()))
-                        // Case 1: /gsr set_max_hp -> Defaults to 10
-                        .executes(context -> {
-                            updateMaxHearts(context.getSource().getServer(), 10.0f);
-                            context.getSource().sendFeedback(() -> Text.literal("§6[GSR] Max Health reset to DEFAULT: §f10 hearts"), true);
-                            return 1;
-                        })
-                        // Case 2: /gsr set_max_hp <amount>
-                        .then(argument("amount", FloatArgumentType.floatArg(0.5f, 100.0f))
-                                .executes(context -> {
-                                    float val = FloatArgumentType.getFloat(context, "amount");
-                                    updateMaxHearts(context.getSource().getServer(), val);
-                                    context.getSource().sendFeedback(() -> Text.literal("§6[GSR] Max Health set to: §f" + val + " hearts"), true);
-                                    return 1;
-                                })))
-
-                // --- HUD CONFIGURATION ---
-                // Requirements None
-                .then(literal("toggle_hud")
-                        .requires(source -> CommandManager.ALWAYS_PASS_CHECK.allows(source.getPermissions()))
-                        .executes(context -> {
-                            GSRMain.CONFIG.hudMode = (GSRMain.CONFIG.hudMode + 1) % 3;
-                            GSRMain.saveAndSync(context.getSource().getServer());
-                            String mode = switch (GSRMain.CONFIG.hudMode) {
-                                case 0 -> "Always Visible";
-                                case 1 -> "Tab Only (Hold TAB)";
-                                default -> "Hidden";
+                // --- BRANCH: HUD ---
+                .then(literal("hud")
+                        .then(literal("visibility_toggle").executes(context -> {
+                            var pConfig = GSRConfigPlayer.INSTANCE;
+                            pConfig.hudMode = (pConfig.hudMode + 1) % 3;
+                            pConfig.save();
+                            String mode = switch (pConfig.hudMode) {
+                                case 0 -> "ALWAYS VISIBLE";
+                                case 1 -> "TAB ONLY";
+                                default -> "HIDDEN";
                             };
                             context.getSource().sendFeedback(() -> Text.literal("§6[GSR] HUD Mode: §f" + mode), false);
                             return 1;
-                        })
-                        .then(literal("timer_hud_side")
-                                .executes(context -> {
-                                    GSRMain.CONFIG.timerHudOnRight = !GSRMain.CONFIG.timerHudOnRight;
-                                    GSRMain.saveAndSync(context.getSource().getServer());
-                                    String side = GSRMain.CONFIG.timerHudOnRight ? "RIGHT" : "LEFT";
-                                    context.getSource().sendFeedback(() -> Text.literal("§6[GSR] Timer HUD moved to: §f" + side), false);
-                                    return 1;
-                                }))
-                        .then(literal("locate_hud_height")
-                                .executes(context -> {
-                                    GSRMain.CONFIG.locateHudOnTop = !GSRMain.CONFIG.locateHudOnTop;
-                                    GSRMain.saveAndSync(context.getSource().getServer());
-                                    // If true -> Top, If false -> Bottom
-                                    String pos = GSRMain.CONFIG.locateHudOnTop ? "TOP" : "BOTTOM";
-                                    context.getSource().sendFeedback(() -> Text.literal("§6[GSR] Locate HUD moved to: §f" + pos), false);
-                                    return 1;
-                                }))
-                        .then(literal("scale_timer_hud")
-                                .executes(context -> {
-                                    GSRMain.CONFIG.timerHudScale = 1.0f;
-                                    GSRMain.saveAndSync(context.getSource().getServer());
-                                    context.getSource().sendFeedback(() -> Text.literal("§6[GSR] Timer HUD scale reset to §f1.0"), true);
-                                    return 1;
-                                })
-                                .then(argument("value", FloatArgumentType.floatArg(GSRConfig.MIN_TIMER_HUD_SCALE, GSRConfig.MAX_TIMER_HUD_SCALE))
+                        }))
+                        .then(literal("side_toggle").executes(context -> {
+                            var pConfig = GSRConfigPlayer.INSTANCE;
+                            pConfig.timerHudOnRight = !pConfig.timerHudOnRight;
+                            pConfig.save();
+                            context.getSource().sendFeedback(() -> Text.literal("§6[GSR] Timer Side: §b" + (pConfig.timerHudOnRight ? "RIGHT" : "LEFT")), false);
+                            return 1;
+                        }))
+                        .then(literal("height_toggle").executes(context -> {
+                            var pConfig = GSRConfigPlayer.INSTANCE;
+                            pConfig.locateHudOnTop = !pConfig.locateHudOnTop;
+                            pConfig.save();
+                            String pos = pConfig.locateHudOnTop ? "TOP" : "BOTTOM";
+                            context.getSource().sendFeedback(() -> Text.literal("§6[GSR] Locate Bar Position: §e" + pos), false);
+                            return 1;
+                        }))
+                        .then(literal("scale")
+                                .then(argument("value", FloatArgumentType.floatArg(GSRConfigPlayer.MIN_HUD_SCALE, GSRConfigPlayer.MAX_HUD_SCALE))
                                         .executes(context -> {
-                                            float val = FloatArgumentType.getFloat(context, "value");
-                                            GSRMain.CONFIG.timerHudScale = val;
-                                            GSRMain.saveAndSync(context.getSource().getServer());
-                                            context.getSource().sendFeedback(() -> Text.literal("§6[GSR] Timer HUD scale set to: §f" + val), true);
+                                            float scale = FloatArgumentType.getFloat(context, "value");
+                                            GSRConfigPlayer.INSTANCE.timerHudScale = scale;
+                                            GSRConfigPlayer.INSTANCE.locateHudScale = scale;
+                                            GSRConfigPlayer.INSTANCE.save();
+                                            context.getSource().sendFeedback(() -> Text.literal("§6[GSR] HUD Scale set to: §f" + String.format("%.2f", scale)), false);
                                             return 1;
-                                        })))
-                        .then(literal("scale_locate_hud")
-                                .executes(context -> {
-                                    GSRMain.CONFIG.locateHudScale = 1.0f;
-                                    GSRMain.saveAndSync(context.getSource().getServer());
-                                    context.getSource().sendFeedback(() -> Text.literal("§6[GSR] Locate HUD scale reset to §f1.0"), true);
-                                    return 1;
-                                })
-                                .then(argument("value", FloatArgumentType.floatArg(GSRConfig.MIN_LOCATE_HUD_SCALE, GSRConfig.MAX_LOCATE_HUD_SCALE))
-                                        .executes(context -> {
-                                            float val = FloatArgumentType.getFloat(context, "value");
-                                            GSRMain.CONFIG.locateHudScale = val;
-                                            GSRMain.saveAndSync(context.getSource().getServer());
-                                            context.getSource().sendFeedback(() -> Text.literal("§6[GSR] Locate HUD scale set to: §f" + val), true);
-                                            return 1;
-                                        })))
-                )
+                                        })))) // Correctly closes scale -> argument -> executes
 
-                // --- STRUCTURE LOCATOR ---
-                // Requirement: Admins ALWAYS, or Everyone if the run is over (Failed or Won)
-                .then(literal("easy_locate")
+                // --- BRANCH: LOCATE ---
+                .then(literal("locate")
                         .requires(source -> {
                             var config = GSRMain.CONFIG;
-                            boolean isFinished = (config != null && (config.isFailed || config.wasVictorious));
-                            return CommandManager.ADMINS_CHECK.allows(source.getPermissions()) || isFinished;
+                            return CommandManager.ADMINS_CHECK.allows(source.getPermissions()) ||
+                                    (config != null && (config.isFailed || config.wasVictorious));
                         })
-                        .then(literal("fortress").executes(context -> toggleLocate(context.getSource(), "Fortress")))
-                        .then(literal("bastion").executes(context -> toggleLocate(context.getSource(), "Bastion")))
-                        .then(literal("stronghold").executes(context -> toggleLocate(context.getSource(), "Stronghold")))
-                        .then(literal("ship").executes(context -> toggleLocate(context.getSource(), "Ship")))
+                        .then(literal("fortress_toggle").executes(context -> toggleLocate(context.getSource(), "Fortress")))
+                        .then(literal("bastion_toggle").executes(context -> toggleLocate(context.getSource(), "Bastion")))
+                        .then(literal("stronghold_toggle").executes(context -> toggleLocate(context.getSource(), "Stronghold")))
+                        .then(literal("ship_toggle").executes(context -> toggleLocate(context.getSource(), "Ship")))
                         .then(literal("clear").executes(context -> {
-                            clearLocator(context.getSource().getServer());
-                            notifyOps(context.getSource(), "§8[GSR] All locators cleared");
+                            clearAllLocates(context.getSource().getServer());
+                            context.getSource().sendFeedback(() -> Text.literal("§6[GSR] §aAll structure locators cleared."), false);
                             return 1;
-                        }))
-                )
-
-                // --- ADMIN COMMANDS: RESET RUN ---
-                // Requirement: Admins ALWAYS, or Everyone if the run is over
-                .then(literal("reset")
-                        .requires(source -> {
-                            var config = GSRMain.CONFIG;
-                            boolean isFinished = (config != null && (config.isFailed || config.wasVictorious));
-                            return CommandManager.ADMINS_CHECK.allows(source.getPermissions()) || isFinished;
-                        })
-                        .executes(context -> {
-                            executeReset(context.getSource().getServer());
-                            return 1;
-                        }))
-        );
+                        })))
+        ); // <--- THIS SEMICOLON CLOSES THE dispatcher.register CALL
     }
 
     /**
-     * Helper to apply max health changes to the config and all active players.
+     * Prints a formatted status summary of the current settings to the user's chat.
+     */
+    private static void displayStatus(ServerCommandSource source) {
+        var worldConfig = GSRMain.CONFIG;
+        var playerConfig = GSRConfigPlayer.INSTANCE;
+        String hudStatus = switch (playerConfig.hudMode) {
+            case 0 -> "§aALWAYS VISIBLE";
+            case 1 -> "§bTAB ONLY";
+            default -> "§cHIDDEN";
+        };
+        source.sendFeedback(() -> Text.literal(
+                "§6§l[GSR] Current Configuration:\n" +
+                        "§f- HUD Mode: " + hudStatus + "\n" +
+                        "§f- Timer Side: §b" + (playerConfig.timerHudOnRight ? "RIGHT" : "LEFT") + "\n" +
+                        "§f- Locate Pos: §e" + (playerConfig.locateHudOnTop ? "TOP" : "BOTTOM") + "\n" +
+                        "§f- Group Death: " + (worldConfig.groupDeathEnabled ? "§aON" : "§cOFF") + "\n" +
+                        "§f- Shared HP: " + (worldConfig.sharedHealthEnabled ? "§aON" : "§cOFF") + "\n" +
+                        "§f- Max Hearts: §c" + worldConfig.maxHearts
+        ), false);
+    }
+
+    /**
+     * Pauses or resumes the global timer and saves the state to config.
+     */
+    private static int togglePause(ServerCommandSource source, boolean shouldPause) {
+        var config = GSRMain.CONFIG;
+        if (config == null) return 0;
+        if (shouldPause && !config.isTimerFrozen) {
+            config.isTimerFrozen = true;
+            config.frozenTime = System.currentTimeMillis() - config.startTime;
+            source.getServer().getPlayerManager().broadcast(Text.literal("§6[GSR] §cTimer Paused!"), false);
+        } else if (!shouldPause && config.isTimerFrozen) {
+            config.isTimerFrozen = false;
+            config.startTime = System.currentTimeMillis() - config.frozenTime;
+            source.getServer().getPlayerManager().broadcast(Text.literal("§6[GSR] §aTimer Resumed!"), false);
+        } else {
+            source.sendFeedback(() -> Text.literal("§e[GSR] Timer is already " + (shouldPause ? "paused." : "running.")), false);
+        }
+        GSRMain.saveAndSync(source.getServer());
+        return 1;
+    }
+
+    /**
+     * Updates max health for all online players and updates the global config.
      */
     private static void updateMaxHearts(MinecraftServer server, float amount) {
-        GSRMain.CONFIG.maxHearts = amount; // Ensure GSRConfig.maxHearts is float
+        GSRMain.CONFIG.maxHearts = amount;
         for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
             GSREvents.applyMaxHealth(p, amount);
         }
         GSRMain.saveAndSync(server);
     }
 
+    /**
+     * Logic for individual structure toggles. If turning ON, it triggers a search.
+     */
     private static int toggleLocate(ServerCommandSource source, String type) {
         var config = GSRMain.CONFIG;
-        boolean isActive = switch (type.toLowerCase()) {
-            case "fortress" -> config.fortressActive;
-            case "bastion" -> config.bastionActive;
-            case "stronghold" -> config.strongholdActive;
-            case "ship" -> config.shipActive;
-            default -> false;
-        };
+        boolean nowActive;
+        switch (type.toLowerCase()) {
+            case "fortress" -> { config.fortressActive = !config.fortressActive; nowActive = config.fortressActive; }
+            case "bastion" -> { config.bastionActive = !config.bastionActive; nowActive = config.bastionActive; }
+            case "stronghold" -> { config.strongholdActive = !config.strongholdActive; nowActive = config.strongholdActive; }
+            case "ship" -> { config.shipActive = !config.shipActive; nowActive = config.shipActive; }
+            default -> { return 0; }
+        }
 
-        if (isActive) {
-            switch (type.toLowerCase()) {
-                case "fortress" -> config.fortressActive = false;
-                case "bastion" -> config.bastionActive = false;
-                case "stronghold" -> config.strongholdActive = false;
-                case "ship" -> config.shipActive = false;
-            }
+        if (nowActive) {
+            return locateAndSync(source, type);
+        } else {
             GSRMain.saveAndSync(source.getServer());
             source.sendFeedback(() -> Text.literal("§6[GSR] " + type + " locator §cOFF"), false);
             return 1;
         }
-
-        return locateAndSync(source, type);
     }
 
-    private static void clearLocator(MinecraftServer server) {
-        var config = GSRMain.CONFIG;
-        config.fortressActive = false;
-        config.bastionActive = false;
-        config.strongholdActive = false;
-        config.shipActive = false;
-        GSRMain.saveAndSync(server);
-    }
-
+    /**
+     * Performs a server-side search for the nearest specified structure and saves coordinates.
+     */
     private static int locateAndSync(ServerCommandSource source, String type) {
         ServerPlayerEntity player = source.getPlayer();
         if (player == null) return 0;
-
         ServerWorld world = source.getWorld();
         var structureRegistry = world.getRegistryManager().getOrThrow(RegistryKeys.STRUCTURE);
 
@@ -315,7 +254,6 @@ public class GSRCommands {
         };
 
         var structureEntry = structureRegistry.getOptional(structureKey);
-
         if (structureEntry.isPresent()) {
             RegistryEntryList<Structure> structureSet = RegistryEntryList.of(structureEntry.get());
             Pair<BlockPos, RegistryEntry<Structure>> result = world.getChunkManager().getChunkGenerator()
@@ -324,81 +262,71 @@ public class GSRCommands {
             if (result != null) {
                 BlockPos pos = result.getFirst();
                 var config = GSRMain.CONFIG;
-
                 switch (type.toLowerCase()) {
                     case "fortress" -> { config.fortressX = pos.getX(); config.fortressZ = pos.getZ(); config.fortressActive = true; }
                     case "bastion" -> { config.bastionX = pos.getX(); config.bastionZ = pos.getZ(); config.bastionActive = true; }
                     case "stronghold" -> { config.strongholdX = pos.getX(); config.strongholdZ = pos.getZ(); config.strongholdActive = true; }
                     case "ship" -> { config.shipX = pos.getX(); config.shipZ = pos.getZ(); config.shipActive = true; }
                 }
-
                 GSRMain.saveAndSync(source.getServer());
-                source.sendFeedback(() -> Text.literal("§6[GSR] " + type + " located at §f" + pos.getX() + ", " + pos.getZ()), false);
+                source.sendFeedback(() -> Text.literal("§6[GSR] " + type + " located at §f" + pos.getX() + ", " + pos.getZ() + " §a(HUD ON)"), false);
                 return 1;
             }
         }
-
         source.sendError(Text.literal("Could not find " + type + " in this dimension."));
         return 0;
     }
 
     /**
-     * Resets the entire run state, world time, and player statistics.
+     * Batch-disables all active structure locators.
+     */
+    private static void clearAllLocates(MinecraftServer server) {
+        var config = GSRMain.CONFIG;
+        if (config == null) return;
+        config.fortressActive = false;
+        config.bastionActive = false;
+        config.strongholdActive = false;
+        config.shipActive = false;
+        GSRMain.saveAndSync(server);
+    }
+
+    /**
+     * The heavy lifter: Resets the world time, resets player stats, clears inventories,
+     * revokes advancements, and teleports everyone back to spawn.
      */
     private static void executeReset(MinecraftServer server) {
         ServerWorld overworld = server.getOverworld();
-
-        // 1. Reset World Time
         overworld.setTimeOfDay(0);
-
-        // 2. Clear Logic State
         GSRStats.reset();
         GSREvents.resetHealth();
 
-        // 3. Reset Config & Timer Flags
         var config = GSRMain.CONFIG;
-        config.startTime = -1; // Reset to -1 so auto-start triggers on movement
+        config.startTime = -1;
         config.isTimerFrozen = false;
         config.frozenTime = 0;
         config.isFailed = false;
         config.wasVictorious = false;
-
-        // 4. Clear Locators
         config.fortressActive = false;
         config.bastionActive = false;
         config.strongholdActive = false;
         config.shipActive = false;
 
         BlockPos spawnPos = overworld.getSpawnPoint().getPos();
-
         for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
-            // 5. Reset Player Vitals
             p.changeGameMode(GameMode.SURVIVAL);
             p.getInventory().clear();
             p.getHungerManager().setFoodLevel(20);
-
-            // Apply configured max health on reset
             GSREvents.applyMaxHealth(p, config.maxHearts);
-
             p.clearStatusEffects();
             p.setFireTicks(0);
             p.setOnFire(false);
             p.setExperienceLevel(0);
             p.setExperiencePoints(0);
-
-            // 6. Teleport to Spawn
-            p.teleport(overworld,
-                    spawnPos.getX() + 0.5,
-                     spawnPos.getY(),
-                    spawnPos.getZ() + 0.5,
-                    java.util.Collections.emptySet(),
-                    0.0f,
-                    0.0f,
-                    true
-            );
+            // Teleport to spawn
+            p.teleport(overworld, spawnPos.getX() + 0.5, spawnPos.getY(), spawnPos.getZ() + 0.5, java.util.Collections.emptySet(), 0.0f, 0.0f, true);
             p.setSpawnPoint(null, false);
 
-            // 7. Revoke Advancements
+            // Wipe Advancements
             PlayerAdvancementTracker tracker = p.getAdvancementTracker();
             server.getAdvancementLoader().getAdvancements().forEach(entry -> {
                 AdvancementProgress progress = tracker.getProgress(entry);
@@ -407,19 +335,7 @@ public class GSRCommands {
                 }
             });
         }
-
-        // 8. Final Sync
         GSRMain.saveAndSync(server);
         server.getPlayerManager().broadcast(Text.literal("§6§l[GSR] Run Reset, Go!"), false);
-    }
-
-    private static void notifyOps(ServerCommandSource source, String message) {
-        Text notification = Text.literal(message);
-        source.getServer().getPlayerManager().getPlayerList().forEach(player -> {
-            if (CommandManager.ADMINS_CHECK.allows(player.getCommandSource().getPermissions())) {
-                player.sendMessage(notification, false);
-            }
-        });
-        LOGGER.info(notification.getString());
     }
 }

@@ -18,11 +18,11 @@
 		"main": [
 			"net.berkle.groupspeedrun.GSRMain"
 		],
-		"fabric-datagen": [
-			"net.berkle.groupspeedrun.GSRDataGenerator"
-		],
 		"client": [
 			"net.berkle.groupspeedrun.GSRClient"
+		],
+		"fabric-datagen": [
+			"net.berkle.groupspeedrun.GSRDataGenerator"
 		]
 	},
 	"mixins": [

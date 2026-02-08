@@ -1,9 +1,11 @@
 package net.berkle.groupspeedrun.mixin.huds;
 
 import net.berkle.groupspeedrun.GSRMain;
-import net.berkle.groupspeedrun.GSREvents;
+import net.berkle.groupspeedrun.config.GSRConfigPlayer;
+import net.berkle.groupspeedrun.config.GSRConfigWorld;
 import net.berkle.groupspeedrun.util.GSRColorHelper;
-import net.berkle.groupspeedrun.util.GSRTimerHudState;
+import net.berkle.groupspeedrun.util.GSRFormatUtil;
+import net.berkle.groupspeedrun.util.GSRAlphaUtil;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.font.TextRenderer;
 import net.minecraft.client.gui.DrawContext;
@@ -15,6 +17,10 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
+/**
+ * Mixin to inject the Speedrun Timer into the Minecraft In-Game HUD.
+ * Handles the layout, scaling, and dynamic transparency of the timer box.
+ */
 @Mixin(InGameHud.class)
 public class GSRTimerHudMixin {
 
@@ -22,60 +28,52 @@ public class GSRTimerHudMixin {
     private void renderScoreboardTimer(DrawContext context, RenderTickCounter tickCounter, CallbackInfo ci) {
         MinecraftClient client = MinecraftClient.getInstance();
 
-        // Safety: Prevent rendering in F1 mode, loading screens, or if the player is null
+        // 1. LIFECYCLE SAFETY CHECKS
+        // Prevent rendering if the player is dead, the HUD is hidden (F1), or world is loading.
         if (client.player == null || client.options.hudHidden || client.world == null) return;
 
-        var config = GSRMain.CONFIG;
-        if (config == null) return;
+        GSRConfigWorld worldConfig = GSRMain.CONFIG;
+        GSRConfigPlayer playerConfig = GSRConfigPlayer.INSTANCE;
 
-        // --- VISIBILITY & FADE LOGIC ---
-        // These variables help determine if we are in the "Post-Game" state (Victory/Fail)
-        boolean isFinished = config.wasVictorious || config.isFailed;
-        long ticksSinceEnd = client.world.getTime() - config.frozenTime;
+        if (worldConfig == null) return;
 
-        /**
-         * ALPHA CALCULATION:
-         * This call to GSRTimerHudState now handles three distinct visibility triggers:
-         * 1. The HUD Mode in Config (Always vs Hidden)
-         * 2. The User holding the Tab key (Smooth fade-in)
-         * 3. The 10-second Split Pop-up (Triggered by config.lastSplitTime)
-         */
-        float fadeAlpha = GSRTimerHudState.getFadeAlpha(client, config, isFinished, ticksSinceEnd);
+        // --- 2. ALPHA & VISIBILITY LOGIC ---
+        // Note: We do NOT check hudMode or Tab-press here. We delegate that to the AlphaUtil.
+        // This ensures the "Fade Out" animation can finish even after the user releases the Tab key.
+        boolean isFinished = worldConfig.wasVictorious || worldConfig.isFailed;
+        long currentTime = client.world.getTime();
+        long ticksSinceEnd = currentTime - worldConfig.lastSplitTime;
 
-        // Efficiency: If the HUD is effectively invisible, skip all text and box math
-        if (fadeAlpha <= 0.01f) return;
-        // -------------------------------
+        // Calculate the smooth alpha based on Tab press, split pop-ups, and victory state.
+        float fadeAlpha = GSRAlphaUtil.getFadeAlpha(client, worldConfig, isFinished, ticksSinceEnd);
 
-        // --- TIME CALCULATION ---
-        // Get the current run time, accounting for pauses and server synchronization
-        long displayTicks = GSREvents.getRunTicks(client.getServer());
-        if (client.getServer() == null && config.startTime >= 0) {
-            displayTicks = isFinished ?
-                    (config.frozenTime - config.startTime) - config.totalPausedTicks :
-                    (client.world.getTime() - config.startTime) - config.totalPausedTicks;
-        }
+        // If the alpha is effectively zero, stop execution to save performance.
+        if (fadeAlpha <= 0.001f) return;
 
-        // --- TEXT PREPARATION ---
+        // --- 3. PREPARE DATA & STRINGS ---
         TextRenderer tr = client.textRenderer;
+        long displayTicks = worldConfig.getElapsedTime() / 50;
 
-        // Update title colors and text based on victory or failure status
-        String titleLabel = config.wasVictorious ? "§a§lGSR VICTORY!" : (config.isFailed ? "§c§lGSR FAIL" : "§6§lGSR Time:");
-        String titleTime = (config.wasVictorious ? "§a" : (config.isFailed ? "§c" : "§f")) + formatFullTime(displayTicks);
+        // Dynamic Header Strings
+        String titleLabel = worldConfig.wasVictorious ? "§a§lGSR VICTORY!" : (worldConfig.isFailed ? "§c§lGSR FAIL" : "§6§lGSR Time:");
+        String timeColor = worldConfig.wasVictorious ? "§a" : (worldConfig.isFailed ? "§c" : "§f");
+        String pauseTag = worldConfig.isTimerFrozen && !isFinished ? " §7[PAUSED]" : "";
+        String titleTime = timeColor + GSRFormatUtil.formatTime(displayTicks) + pauseTag;
 
-        // Find the most recent split to mark it with a gold star in the UI
-        long latestTime = Math.max(config.timeNether, Math.max(config.timeBastion,
-                Math.max(config.timeFortress, Math.max(config.timeEnd, config.timeDragon))));
+        // Determine which split is the "latest" to show the gold star icon
+        long latestTime = Math.max(worldConfig.timeNether, Math.max(worldConfig.timeBastion,
+                Math.max(worldConfig.timeFortress, Math.max(worldConfig.timeEnd, worldConfig.timeDragon))));
 
         String[][] splitData = {
-                prepareLine("Nether", config.timeNether, latestTime),
-                prepareLine("Bastion", config.timeBastion, latestTime),
-                prepareLine("Fortress", config.timeFortress, latestTime),
-                prepareLine("The End", config.timeEnd, latestTime),
-                prepareLine("Dragon", config.timeDragon, latestTime)
+                prepareLine("Nether", worldConfig.timeNether, latestTime),
+                prepareLine("Bastion", worldConfig.timeBastion, latestTime),
+                prepareLine("Fortress", worldConfig.timeFortress, latestTime),
+                prepareLine("The End", worldConfig.timeEnd, latestTime),
+                prepareLine("Dragon", worldConfig.timeDragon, latestTime)
         };
 
-        // --- DYNAMIC UI SIZING ---
-        // Calculate the required width of the box by measuring the text strings
+        // --- 4. DYNAMIC UI SIZING ---
+        // Calculate the box width based on the longest string to prevent text overflow.
         int nameColWidth = tr.getWidth(titleLabel);
         int timeColWidth = tr.getWidth(titleTime);
         for (String[] split : splitData) {
@@ -84,53 +82,54 @@ public class GSRTimerHudMixin {
         }
 
         final int padding = 6;
-        final int spacing = 10;
         final int rowHeight = 10;
-        final int totalBoxWidth = nameColWidth + spacing + timeColWidth + (padding * 2);
+        final int totalBoxWidth = nameColWidth + 10 + timeColWidth + (padding * 2);
         final int boxHeight = ((splitData.length + 1) * rowHeight) + (padding * 2) + 4;
 
-        // --- MATRIX TRANSFORMATIONS ---
+        // --- 5. TRANSFORMATIONS (POSITION & SCALE) ---
         context.getMatrices().pushMatrix();
 
-        // Position the HUD at the vertical center-top area
-        float pivotY = (context.getScaledWindowHeight() / 2f) - (boxHeight / 2f) - (context.getScaledWindowHeight() * 0.15f);
-        // Position horizontally based on user preference (Left vs Right side)
-        float pivotX = config.timerHudOnRight ? (context.getScaledWindowWidth() - 10) : 10;
+        float scale = playerConfig.timerHudScale;
 
+        // 1. Calculate the actual width/height on screen after scaling
+        float scaledWidth = totalBoxWidth * scale;
+        float scaledHeight = boxHeight * scale;
+
+        // 2. Determine Pivot X (The corner point)
+        float pivotX = playerConfig.timerHudOnRight ? (context.getScaledWindowWidth() - 10 - scaledWidth) : 10;
+
+        // 3. Determine Pivot Y (Centered vertically with 15% upward offset)
+        float pivotY = (context.getScaledWindowHeight() / 2f) - (scaledHeight / 2f) - (context.getScaledWindowHeight() * 0.15f);
+
+        // 4. Apply transformations
+        // We translate to the final screen position FIRST, then scale.
         context.getMatrices().translate(pivotX, pivotY);
-        context.getMatrices().scale(config.timerHudScale, config.timerHudScale);
+        context.getMatrices().scale(scale, scale);
 
-        // If anchored to the right, shift the box left so it doesn't bleed off screen
-        if (config.timerHudOnRight) {
-            context.getMatrices().translate(-totalBoxWidth, 0);
-        }
+        // --- 6. FINAL RENDERING ---
+        // Note: Because the matrix is now scaled, we draw from (0,0) to (totalBoxWidth, boxHeight)
+        // and OpenGL handles the size reduction for us.
 
-        // --- RENDERING ---
-
-        // 1. Draw the main background box with custom fade transparency
+        // --- 6. FINAL RENDERING ---
+        // Render the semi-transparent background box
         context.fill(0, 0, totalBoxWidth, boxHeight, GSRColorHelper.getBackgroundWithAlpha(0x90, fadeAlpha));
 
-        // Create the base text color (White) combined with our dynamic alpha
+        // Prepare colors with applied alpha
         int mainTextColor = GSRColorHelper.applyAlpha(0xFFFFFF, fadeAlpha);
+        int sepCol = GSRColorHelper.applyAlpha(0xFFFFFF, 0.31f * fadeAlpha);
 
-        // 2. Render Header (Title and Current Time)
+        // Draw Headers
         context.drawTextWithShadow(tr, titleLabel, padding, padding, mainTextColor);
         context.drawTextWithShadow(tr, titleTime, totalBoxWidth - padding - tr.getWidth(titleTime), padding, mainTextColor);
 
-        // 3. Render the decorative separator line
-        int separatorColor = GSRColorHelper.applyAlpha(0xFFFFFF, 0.31f * fadeAlpha);
-        context.fill(2, padding + rowHeight + 1, totalBoxWidth - 2, padding + rowHeight + 2, separatorColor);
+        // Draw Separator Line
+        context.fill(2, padding + rowHeight + 1, totalBoxWidth - 2, padding + rowHeight + 2, sepCol);
 
-        // 4. Render Split rows
+        // Draw Split Rows
         int currentY = padding + rowHeight + 5;
         for (String[] split : splitData) {
-            // Split name and status icon
             context.drawTextWithShadow(tr, split[2] + split[0], padding, currentY, mainTextColor);
-
-            // Split time (Right aligned)
-            int tW = tr.getWidth(split[1]);
-            context.drawTextWithShadow(tr, split[1], totalBoxWidth - padding - tW, currentY, mainTextColor);
-
+            context.drawTextWithShadow(tr, split[1], totalBoxWidth - padding - tr.getWidth(split[1]), currentY, mainTextColor);
             currentY += rowHeight;
         }
 
@@ -138,28 +137,13 @@ public class GSRTimerHudMixin {
     }
 
     /**
-     * Converts raw split data into UI strings with icons.
-     * ✔ = Completed, ○ = Pending, ★ = Most recent split.
+     * Helper to format a single line of the split list.
+     * Includes logic for "Not Started" icons (○) vs "Completed" checkmarks (✔).
      */
     @Unique
     private String[] prepareLine(String name, long ticks, long latest) {
         if (ticks <= 0) return new String[]{"§7○ " + name, "§7--:--", ""};
-        return new String[]{"§a✔ " + name, "§f" + formatFullTime(ticks), (ticks == latest) ? "§6★ " : ""};
-    }
-
-    /**
-     * Converts tick count into a formatted string: MM:SS.CC or H:MM:SS.CC
-     */
-    @Unique
-    private String formatFullTime(long ticks) {
-        long totalMs = ticks * 50;
-        long h = totalMs / 3600000;
-        long m = (totalMs / 60000) % 60;
-        long s = (totalMs / 1000) % 60;
-        long f = (totalMs % 1000) / 10;
-
-        return h > 0 ?
-                String.format("%d:%02d:%02d.%02d", h, m, s, f) :
-                String.format("%02d:%02d.%02d", m, s, f);
+        String starIcon = (ticks == latest) ? "§6★ " : "";
+        return new String[]{"§a✔ " + name, "§f" + GSRFormatUtil.formatTime(ticks), starIcon};
     }
 }

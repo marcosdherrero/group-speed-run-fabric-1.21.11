@@ -11,6 +11,7 @@
     "trackers.GSRPlayerTracker",
     "trackers.GSRServerPlayerInterTracker",
     "trackers.GSRSplitTracker",
+    "accessors.BossBarHudAccessor",
     "huds.GSRTimerHudMixin",
     "huds.GSRLocateHudMixin"
   ],

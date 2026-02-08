@@ -22,22 +22,28 @@ public abstract class GSRItemEntityTracker {
      */
     @Inject(method = "onPlayerCollision", at = @At(value = "INVOKE", target = "Lnet/minecraft/entity/player/PlayerInventory;insertStack(Lnet/minecraft/item/ItemStack;)Z"))
     private void onPickup(PlayerEntity player, CallbackInfo ci) {
-        // Ensure logic only runs on the Server side and when the timer is active
+        // 1. Safety Checks: Server-side only and active timer
         if (player.getEntityWorld().isClient() || GSRMain.CONFIG == null || GSRMain.CONFIG.isTimerFrozen) return;
 
+        ItemEntity itemEntity = (ItemEntity) (Object) this;
         ItemStack stack = this.getStack();
 
-        if (stack.isOf(Items.BLAZE_ROD)) {
+        // 2. Target Item: Blaze Rods
+        if (stack.isOf(Items.BLAZE_ROD) && !itemEntity.isRemoved()) {
             long lastKill = GSRStats.LAST_BLAZE_KILL_TIME.getOrDefault(player.getUuid(), 0L);
             long currentTime = player.getEntityWorld().getTime();
 
             // 600 ticks = 30 seconds
-            if (currentTime - lastKill <= 600) {
-                GSRStats.POG_CHAMP_COUNT.merge(player.getUuid(), stack.getCount(), Integer::sum);
+            if (lastKill > 0 && (currentTime - lastKill <= 600)) {
+                // Use the helper method to flip the isDirty flag!
+                GSRStats.addInt(GSRStats.POG_CHAMP_COUNT, player.getUuid(), stack.getCount());
 
-                // Reset to 0 so a single kill doesn't count for multiple separate rod pickups
-                // (e.g., if the rods were dropped in separate stacks)
+                // Reset the kill time to 0 to prevent double-dipping on multiple stacks
                 GSRStats.LAST_BLAZE_KILL_TIME.put(player.getUuid(), 0L);
+
+                // Note: We use .put for LAST_BLAZE_KILL_TIME because it's a temporary
+                // timestamp tracker, not a cumulative stat that needs to be persisted
+                // across server restarts like the POG_CHAMP_COUNT.
             }
         }
     }
