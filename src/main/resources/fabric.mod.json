@@ -12,7 +12,7 @@
 		"sources": "N/A"
 	},
 	"license": "MIT",
-	"icon": "assets/group-speed-run/icon.png",
+	"icon": "assets/group-speed-run/GSRIcon.png",
 	"environment": "*",
 	"entrypoints": {
 		"main": [

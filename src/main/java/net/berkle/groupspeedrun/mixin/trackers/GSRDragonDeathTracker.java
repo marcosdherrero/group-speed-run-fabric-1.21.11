@@ -21,11 +21,11 @@ public abstract class GSRDragonDeathTracker {
     private void groupspeedrun$onDragonDeathAnimation(CallbackInfo ci) {
         EnderDragonEntity dragon = (EnderDragonEntity) (Object) this;
 
-        // Ensure we are on the server side and config exists
         if (dragon.getEntityWorld().isClient() || GSRMain.CONFIG == null) return;
 
-        // Logic check: health must be zero, and we must not have already ended the run
-        if (dragon.getHealth() <= 0.0f && !GSRMain.CONFIG.isVictorious && !GSRMain.CONFIG.isFailed) {
+        // dragon.deathTime increments every tick of the animation starting at 0.
+        // Checking deathTime == 0 ensures this code runs EXACTLY once on the first frame.
+        if (dragon.deathTime == 0 && !GSRMain.CONFIG.isVictorious && !GSRMain.CONFIG.isFailed) {
             MinecraftServer server = dragon.getEntityWorld().getServer();
             if (server != null) {
                 triggerVictory(server);

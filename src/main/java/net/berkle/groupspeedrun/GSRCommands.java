@@ -6,6 +6,7 @@ import com.mojang.brigadier.tree.LiteralCommandNode;
 import com.mojang.datafixers.util.Pair;
 import net.berkle.groupspeedrun.config.GSRConfigPlayer;
 import net.berkle.groupspeedrun.managers.GSRBroadcastManager;
+import net.berkle.groupspeedrun.managers.GSRSplitManager; // Added import
 import net.minecraft.advancement.AdvancementProgress;
 import net.minecraft.advancement.PlayerAdvancementTracker;
 import net.minecraft.registry.RegistryKeys;
@@ -27,19 +28,13 @@ import org.slf4j.LoggerFactory;
 import static net.minecraft.server.command.CommandManager.literal;
 import static net.minecraft.server.command.CommandManager.argument;
 
-/**
- * Main command handling class for Group Speedrun (GSR).
- * Handles run control, global settings, player-specific HUD preferences, and structure locators.
- */
 public class GSRCommands {
     private static final Logger LOGGER = LoggerFactory.getLogger("GSR-Commands");
 
     public static void register(CommandDispatcher<ServerCommandSource> dispatcher) {
-        // We capture the node, so the semicolon goes at the very end of the builder chain.
         LiteralCommandNode<ServerCommandSource> gsrRoot = dispatcher.register(literal("gsr")
                 .requires(source -> CommandManager.ALWAYS_PASS_CHECK.allows(source.getPermissions()))
 
-                // --- ROOT: STATS & STATUS ---
                 .then(literal("stats").executes(context -> {
                     var config = GSRMain.CONFIG;
                     if (config == null || config.startTime < 0) {
@@ -54,11 +49,9 @@ public class GSRCommands {
                     return 1;
                 }))
 
-                // --- BRANCH: RUN CONTROL ---
                 .then(literal("pause")
                         .requires(source -> {
                             var config = GSRMain.CONFIG;
-                            // Admin only, and only if the run is still in progress
                             return CommandManager.ADMINS_CHECK.allows(source.getPermissions()) &&
                                     (config != null && !config.isFailed && !config.isVictorious);
                         })
@@ -66,7 +59,6 @@ public class GSRCommands {
                 .then(literal("resume")
                         .requires(source -> {
                             var config = GSRMain.CONFIG;
-                            // Must be an admin AND the run must still be valid (not failed and not victorious)
                             return CommandManager.ADMINS_CHECK.allows(source.getPermissions()) &&
                                     (config != null && !config.isFailed && !config.isVictorious);
                         })
@@ -74,8 +66,9 @@ public class GSRCommands {
                 .then(literal("reset")
                         .requires(source -> {
                             var config = GSRMain.CONFIG;
-                            return CommandManager.ADMINS_CHECK.allows(source.getPermissions()) ||
-                                    (config != null && (config.isFailed || config.isVictorious));
+                            boolean isAdmin = CommandManager.ADMINS_CHECK.allows(source.getPermissions());
+                            boolean isFinished = (config != null && (config.isFailed || config.isVictorious));
+                            return isAdmin || isFinished;
                         })
                         .executes(context -> {
                             executeReset(context.getSource().getServer());
@@ -83,7 +76,6 @@ public class GSRCommands {
                             return 1;
                         }))
 
-                // --- BRANCH: SETTINGS ---
                 .then(literal("settings")
                         .requires(source -> CommandManager.ADMINS_CHECK.allows(source.getPermissions()))
                         .then(literal("shared_hp_toggle").executes(context -> {
@@ -109,7 +101,6 @@ public class GSRCommands {
                                             return 1;
                                         }))))
 
-                // --- BRANCH: HUD ---
                 .then(literal("hud")
                         .then(literal("visibility_toggle").executes(context -> {
                             var pConfig = GSRConfigPlayer.INSTANCE;
@@ -147,14 +138,14 @@ public class GSRCommands {
                                             GSRConfigPlayer.INSTANCE.save();
                                             context.getSource().sendFeedback(() -> Text.literal("§6[GSR] HUD Scale set to: §f" + String.format("%.2f", scale)), false);
                                             return 1;
-                                        })))) // Correctly closes scale -> argument -> executes
+                                        }))))
 
-                // --- BRANCH: LOCATE ---
                 .then(literal("locate")
                         .requires(source -> {
                             var config = GSRMain.CONFIG;
-                            return CommandManager.ADMINS_CHECK.allows(source.getPermissions()) ||
-                                    (config != null && (config.isFailed || config.isVictorious));
+                            boolean isAdmin = CommandManager.ADMINS_CHECK.allows(source.getPermissions());
+                            boolean isFinished = (config != null && (config.isFailed || config.isVictorious));
+                            return isAdmin || isFinished;
                         })
                         .then(literal("fortress_toggle").executes(context -> toggleLocate(context.getSource(), "Fortress")))
                         .then(literal("bastion_toggle").executes(context -> toggleLocate(context.getSource(), "Bastion")))
@@ -168,9 +159,6 @@ public class GSRCommands {
         );
     }
 
-    /**
-     * Prints a formatted status summary of the current settings to the user's chat.
-     */
     private static void displayStatus(ServerCommandSource source) {
         var worldConfig = GSRMain.CONFIG;
         var playerConfig = GSRConfigPlayer.INSTANCE;
@@ -190,9 +178,6 @@ public class GSRCommands {
         ), false);
     }
 
-    /**
-     * Pauses or resumes the global timer and saves the state to config.
-     */
     private static int togglePause(ServerCommandSource source, boolean shouldPause) {
         var config = GSRMain.CONFIG;
         if (config == null) return 0;
@@ -211,9 +196,6 @@ public class GSRCommands {
         return 1;
     }
 
-    /**
-     * Updates max health for all online players and updates the global config.
-     */
     private static void updateMaxHearts(MinecraftServer server, float amount) {
         GSRMain.CONFIG.maxHearts = amount;
         for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
@@ -222,9 +204,6 @@ public class GSRCommands {
         GSRMain.saveAndSync(server);
     }
 
-    /**
-     * Logic for individual structure toggles. If turning ON, it triggers a search.
-     */
     private static int toggleLocate(ServerCommandSource source, String type) {
         var config = GSRMain.CONFIG;
         boolean nowActive;
@@ -245,16 +224,13 @@ public class GSRCommands {
         }
     }
 
-    /**
-     * Performs a server-side search for the nearest specified structure and saves coordinates.
-     */
     private static int locateAndSync(ServerCommandSource source, String type) {
         ServerPlayerEntity player = source.getPlayer();
         if (player == null) return 0;
         ServerWorld world = source.getWorld();
+        var server = source.getServer();
         var structureRegistry = world.getRegistryManager().getOrThrow(RegistryKeys.STRUCTURE);
 
-        // 1. Identify the structure key
         var structureKey = switch (type.toLowerCase()) {
             case "fortress" -> StructureKeys.FORTRESS;
             case "bastion" -> StructureKeys.BASTION_REMNANT;
@@ -266,8 +242,6 @@ public class GSRCommands {
         var structureEntry = structureRegistry.getOptional(structureKey);
         if (structureEntry.isPresent()) {
             RegistryEntryList<Structure> structureSet = RegistryEntryList.of(structureEntry.get());
-
-            // 2. Locate the nearest instance of that structure
             Pair<BlockPos, RegistryEntry<Structure>> result = world.getChunkManager().getChunkGenerator()
                     .locateStructure(world, structureSet, player.getBlockPos(), 100, false);
 
@@ -275,17 +249,16 @@ public class GSRCommands {
                 BlockPos pos = result.getFirst();
                 var config = GSRMain.CONFIG;
 
-                // 3. SPECIAL LOGIC FOR END SHIPS (Verification)
                 if (type.equalsIgnoreCase("ship")) {
                     var accessor = world.getStructureAccessor();
-
-                    // Get the specific structure start using the actual Structure object (not the key)
                     var start = accessor.getStructureAt(pos, structureEntry.get().value());
 
                     if (start != null && start.hasChildren()) {
-                        // Check pieces for "ship" identifier
                         boolean hasShip = start.getChildren().stream()
-                                .anyMatch(piece -> piece.getType().toString().toLowerCase().contains("ship"));
+                                .anyMatch(piece -> {
+                                    String id = piece.getType().toString().toLowerCase();
+                                    return id.contains("ship") || id.contains("end_city_ship");
+                                });
 
                         if (!hasShip) {
                             source.sendError(Text.literal("§6[GSR] §cFound End City at " + pos.getX() + ", " + pos.getZ() + " but it has no Ship!"));
@@ -294,7 +267,6 @@ public class GSRCommands {
                     }
                 }
 
-                // 4. Save coordinates to config and activate HUD pin
                 switch (type.toLowerCase()) {
                     case "fortress" -> { config.fortressX = pos.getX(); config.fortressZ = pos.getZ(); config.fortressActive = true; }
                     case "bastion" -> { config.bastionX = pos.getX(); config.bastionZ = pos.getZ(); config.bastionActive = true; }
@@ -302,7 +274,7 @@ public class GSRCommands {
                     case "ship" -> { config.shipX = pos.getX(); config.shipZ = pos.getZ(); config.shipActive = true; }
                 }
 
-                GSRMain.saveAndSync(source.getServer());
+                GSRMain.saveAndSync(server);
                 source.sendFeedback(() -> Text.literal("§6[GSR] " + type + " located at §f" + pos.getX() + ", " + pos.getZ() + " §a(HUD ON)"), false);
                 return 1;
             }
@@ -312,9 +284,60 @@ public class GSRCommands {
         return 0;
     }
 
-    /**
-     * Batch-disables all active structure locators.
-     */
+    private static void executeReset(MinecraftServer server) {
+        net.minecraft.server.world.ServerWorld overworld = server.getOverworld();
+
+        // 1. Silence feedback
+        overworld.getGameRules().setValue(net.minecraft.world.rule.GameRules.SEND_COMMAND_FEEDBACK, false, server);
+
+        // 2. Reset global run state
+        var config = GSRMain.CONFIG;
+        config.startTime = -1;
+        config.isTimerFrozen = false;
+        config.frozenTime = 0;
+        config.isFailed = false;
+        config.isVictorious = false;
+
+        // --- NEW: Reset the splits in the manager ---
+        GSRSplitManager.resetSplits();
+
+        config.fortressActive = false;
+        config.bastionActive = false;
+        config.strongholdActive = false;
+        config.shipActive = false;
+
+        // 3. Reset world and players
+        overworld.setTimeOfDay(0);
+        GSRStats.reset();
+        GSREvents.resetHealth();
+
+        net.minecraft.util.math.BlockPos spawnPos = overworld.getSpawnPoint().getPos();
+
+        for (net.minecraft.server.network.ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
+            p.changeGameMode(net.minecraft.world.GameMode.SURVIVAL);
+            p.getInventory().clear();
+            p.getHungerManager().setFoodLevel(20);
+            p.setHealth(p.getMaxHealth());
+            GSREvents.applyMaxHealth(p, config.maxHearts);
+            p.clearStatusEffects();
+            p.setFireTicks(0);
+            p.setExperienceLevel(0);
+            p.setExperiencePoints(0);
+            p.teleport(overworld, spawnPos.getX() + 0.5, spawnPos.getY(), spawnPos.getZ() + 0.5, java.util.Collections.emptySet(), 0.0f, 0.0f, true);
+
+            net.minecraft.advancement.PlayerAdvancementTracker tracker = p.getAdvancementTracker();
+            server.getAdvancementLoader().getAdvancements().forEach(entry -> {
+                net.minecraft.advancement.AdvancementProgress progress = tracker.getProgress(entry);
+                for (String criteria : progress.getObtainedCriteria()) {
+                    tracker.revokeCriterion(entry, criteria);
+                }
+            });
+        }
+
+        GSRMain.saveAndSync(server);
+        server.getPlayerManager().broadcast(net.minecraft.text.Text.literal("§6§l[GSR] Run Reset, Go!"), false);
+    }
+
     private static void clearAllLocates(MinecraftServer server) {
         var config = GSRMain.CONFIG;
         if (config == null) return;
@@ -323,54 +346,5 @@ public class GSRCommands {
         config.strongholdActive = false;
         config.shipActive = false;
         GSRMain.saveAndSync(server);
-    }
-
-    /**
-     * The heavy lifter: Resets the world time, resets player stats, clears inventories,
-     * revokes advancements, and teleports everyone back to spawn.
-     */
-    private static void executeReset(MinecraftServer server) {
-        ServerWorld overworld = server.getOverworld();
-        overworld.setTimeOfDay(0);
-        GSRStats.reset();
-        GSREvents.resetHealth();
-
-        var config = GSRMain.CONFIG;
-        config.startTime = -1;
-        config.isTimerFrozen = false;
-        config.frozenTime = 0;
-        config.isFailed = false;
-        config.isVictorious = false;
-        config.fortressActive = false;
-        config.bastionActive = false;
-        config.strongholdActive = false;
-        config.shipActive = false;
-
-        BlockPos spawnPos = overworld.getSpawnPoint().getPos();
-        for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
-            p.changeGameMode(GameMode.SURVIVAL);
-            p.getInventory().clear();
-            p.getHungerManager().setFoodLevel(20);
-            GSREvents.applyMaxHealth(p, config.maxHearts);
-            p.clearStatusEffects();
-            p.setFireTicks(0);
-            p.setOnFire(false);
-            p.setExperienceLevel(0);
-            p.setExperiencePoints(0);
-            // Teleport to spawn
-            p.teleport(overworld, spawnPos.getX() + 0.5, spawnPos.getY(), spawnPos.getZ() + 0.5, java.util.Collections.emptySet(), 0.0f, 0.0f, true);
-            p.setSpawnPoint(null, false);
-
-            // Wipe Advancements
-            PlayerAdvancementTracker tracker = p.getAdvancementTracker();
-            server.getAdvancementLoader().getAdvancements().forEach(entry -> {
-                AdvancementProgress progress = tracker.getProgress(entry);
-                for (String criteria : progress.getObtainedCriteria()) {
-                    tracker.revokeCriterion(entry, criteria);
-                }
-            });
-        }
-        GSRMain.saveAndSync(server);
-        server.getPlayerManager().broadcast(Text.literal("§6§l[GSR] Run Reset, Go!"), false);
     }
 }

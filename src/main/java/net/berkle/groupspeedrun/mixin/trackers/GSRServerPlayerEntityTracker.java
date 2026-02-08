@@ -2,6 +2,7 @@ package net.berkle.groupspeedrun.mixin.trackers;
 
 import net.berkle.groupspeedrun.GSRMain;
 import net.berkle.groupspeedrun.GSRStats;
+import net.berkle.groupspeedrun.managers.GSRRunHistoryManager;
 import net.berkle.groupspeedrun.managers.GSRSplitManager;
 import net.berkle.groupspeedrun.managers.GSRBroadcastManager;
 import net.minecraft.entity.damage.DamageSource;
@@ -98,43 +99,53 @@ public abstract class GSRServerPlayerEntityTracker {
      */
     @Inject(method = "onScreenHandlerOpened", at = @At("HEAD"))
     private void onOpen(ScreenHandler handler, CallbackInfo ci) {
+        // Stop recording if the run isn't active
         if (GSRMain.CONFIG == null || GSRMain.CONFIG.isTimerFrozen || GSRMain.CONFIG.isFailed || GSRMain.CONFIG.isVictorious) return;
+
         ServerPlayerEntity player = (ServerPlayerEntity) (Object) this;
 
-        // Don't count opening personal inventory (E)
+        // Ensure we are tracking the "Shuffler" stat
         if (!(handler instanceof net.minecraft.screen.PlayerScreenHandler)) {
             GSRStats.addInt(GSRStats.INVENTORIES_OPENED, player.getUuid(), 1);
         }
     }
-
     /**
      * CUSTOM DEATH LOGIC:
      * Intercepts death to broadcast "Disgrace" failure and SILENCE vanilla death messages.
      */
+    // Inside GSRServerPlayerEntityTracker.java
+
     @Inject(method = "onDeath", at = @At("HEAD"), cancellable = true)
     private void onPlayerDeath(DamageSource source, CallbackInfo ci) {
         ServerPlayerEntity player = (ServerPlayerEntity) (Object) this;
         var config = GSRMain.CONFIG;
 
-        // Only trigger if a run is actually happening and group death is enabled
         if (config != null && config.startTime != -1 && config.groupDeathEnabled && !config.isFailed && !config.isVictorious) {
 
-            // 1. Mark failure state immediately
+            // 1. Lock state
+            config.frozenTime = System.currentTimeMillis() - config.startTime;
             config.isFailed = true;
 
-            // 2. Broadcast custom failure message
+            // 2. Generate stats and broadcast
+            var awards = GSRRunHistoryManager.calculateAwards(this.server, "FAILURE", player.getUuid().toString());
             GSRBroadcastManager.broadcastFailure(
                     this.server,
                     config.getElapsedTime(),
                     player.getName().getString(),
                     source.getDeathMessage(player).getString(),
-                    null
+                    awards
             );
 
-            // 3. Save world and sync config to all clients
+            // 3. THE FIX: Put everyone in spectator mode
+            for (ServerPlayerEntity p : this.server.getPlayerManager().getPlayerList()) {
+                p.changeGameMode(net.minecraft.world.GameMode.SPECTATOR);
+                // Play a sound to emphasize the loss
+                p.playSound(net.minecraft.sound.SoundEvents.ENTITY_LIGHTNING_BOLT_THUNDER, 1.0f, 1.0f);
+            }
+
             GSRMain.saveAndSync(this.server);
 
-            // 4. CANCEL: Stops vanilla logic from sending its own death message packet
+            // 4. Cancel vanilla death so player doesn't actually see the "You Died" screen
             ci.cancel();
         }
     }

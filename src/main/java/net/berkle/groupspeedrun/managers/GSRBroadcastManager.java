@@ -46,48 +46,41 @@ public class GSRBroadcastManager {
 
     public static void broadcastStats(PlayerManager pm, long ticks, JsonObject awards, String mode) {
         boolean isFullList = mode.equalsIgnoreCase("COMMAND");
-        boolean isVictory = mode.equalsIgnoreCase("VICTORY");
-        boolean isFailure = mode.equalsIgnoreCase("FAILURE");
 
         if (isFullList) {
             pm.broadcast(Text.literal("§8§l» §6§lCURRENT RUN PREVIEW §8§l«"), false);
-            if (isFullList) pm.broadcast(Text.literal(getSeparator('8', BAR_LENGTH)), false);
+            pm.broadcast(Text.literal(getSeparator('8', BAR_LENGTH)), false);
         }
 
-        // Changed label from "Final Time" to "Current Time" for the command preview
         String timeLabel = (GSRMain.CONFIG.isFailed || GSRMain.CONFIG.isVictorious)
                 ? "§6Final Time: "
                 : "§6Current Time: ";
         pm.broadcast(Text.literal(timeLabel + "§f" + GSRFormatUtil.formatTime(ticks)), false);
 
-        // --- SECTION 1: PERFORMANCE ---
-        if (isVictory || isFullList) {
-            if (hasAnyData(awards, "dragon_warrior", "adc", "killer", "tank", "defender", "healer", "brew_master", "pog_champ", "builder", "sightseer")) {
-                pm.broadcast(Text.literal("§8§o-- Performance Awards --"), false);
+        // --- SECTION 1: PERFORMANCE (Now shown on Victory, Failure, or Command) ---
+        if (hasAnyData(awards, "dragon_warrior", "adc", "killer", "tank", "defender", "healer", "brew_master", "pog_champ", "builder", "sightseer")) {
+            pm.broadcast(Text.literal("§8§o-- Performance Awards --"), false);
 
-                display(pm, awards, "dragon_warrior", "§5🐉 Dragon Warrior", " dragon damage");
-                display(pm, awards, "adc", "§6🏹 ADC", " most damage");
-                display(pm, awards, "killer", "§4💀 Serial Killer", " most kills");
-                display(pm, awards, "tank", "§4❈ Tank", " damage taken");
-                display(pm, awards, "defender", "§b🛡 Defender", " armor");
-                display(pm, awards, "healer", "§d❤ Healer", " HP healed");
-                display(pm, awards, "brew_master", "§b🧪 Brew Master", " potions drank");
-                display(pm, awards, "pog_champ", "§e🔥 Pog Champ", " rods");
-                display(pm, awards, "builder", "§2🔨 Builder", " blocks");
-                display(pm, awards, "sightseer", "§f👣 Sightseer", " blocks moved");
-            }
+            display(pm, awards, "dragon_warrior", "§5🐉 Dragon Warrior", " dragon damage");
+            display(pm, awards, "adc", "§6🏹 ADC", " most damage");
+            display(pm, awards, "killer", "§4💀 Serial Killer", " most kills");
+            display(pm, awards, "tank", "§4❈ Tank", " damage taken");
+            display(pm, awards, "defender", "§b🛡 Defender", " armor");
+            display(pm, awards, "healer", "§d❤ Healer", " HP healed");
+            display(pm, awards, "brew_master", "§b🧪 Brew Master", " potions drank");
+            display(pm, awards, "pog_champ", "§e🔥 Pog Champ", " rods");
+            display(pm, awards, "builder", "§2🔨 Builder", " blocks");
+            display(pm, awards, "sightseer", "§f👣 Sightseer", " blocks moved");
         }
 
-        // --- SECTION 2: THE ROASTS ---
-        if (isFailure || isFullList) {
-            if (hasAnyData(awards, "shuffler", "coward", "weakling", "good_for_nothing")) {
-                pm.broadcast(Text.literal("§8§o-- Current Hall of Shame --"), false);
+        // --- SECTION 2: THE ROASTS (Now shown on Victory, Failure, or Command) ---
+        if (hasAnyData(awards, "shuffler", "coward", "weakling", "good_for_nothing")) {
+            pm.broadcast(Text.literal("§8§o-- Hall of Shame --"), false);
 
-                display(pm, awards, "shuffler", "§3🗃 Shuffler", " most inventories opened");
-                display(pm, awards, "coward", "§e🏃 Coward", " least damage taken");
-                display(pm, awards, "weakling", "§f🍼 Weakling", " least damage done");
-                display(pm, awards, "good_for_nothing", "§8⚖ Carried", " least advancements");
-            }
+            display(pm, awards, "shuffler", "§3🗃 Shuffler", " most inventories opened");
+            display(pm, awards, "coward", "§e🏃 Coward", " least damage taken");
+            display(pm, awards, "weakling", "§f🍼 Weakling", " least damage done");
+            display(pm, awards, "good_for_nothing", "§8⚖ Carried", " least advancements");
         }
 
         if (isFullList) pm.broadcast(Text.literal(getSeparator('8', BAR_LENGTH)), false);

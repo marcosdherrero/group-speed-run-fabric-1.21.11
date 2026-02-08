@@ -21,7 +21,8 @@ public class GSRSplitManager {
     private static final RegistryKey<Structure> BASTION_KEY = RegistryKey.of(RegistryKeys.STRUCTURE, Identifier.ofVanilla("bastion_remnant"));
 
     /**
-     * Resets all split times. CRITICAL: Call this in GSREvents.executeReset()
+     * Resets all split times in the global config.
+     * This is called by GSRCommands during a run reset.
      */
     public static void resetSplits() {
         var config = GSRMain.CONFIG;
@@ -46,12 +47,14 @@ public class GSRSplitManager {
             var dim = world.getRegistryKey();
             BlockPos pos = player.getBlockPos();
 
+            // Dimension-based splits
             if (dim == World.NETHER && config.timeNether <= 0) {
                 completeSplit(server, "Nether");
             } else if (dim == World.END && config.timeEnd <= 0) {
                 completeSplit(server, "The End");
             }
 
+            // Structure-based splits (Nether)
             if (dim == World.NETHER) {
                 var structureRegistry = world.getRegistryManager().getOrThrow(RegistryKeys.STRUCTURE);
                 if (config.timeBastion <= 0) {
@@ -89,7 +92,6 @@ public class GSRSplitManager {
                     config.timeDragon = splitTicks;
                     config.isVictorious = true;
                     config.isTimerFrozen = true;
-                    // Using real-world clock diff for the frozen anchor
                     config.frozenTime = System.currentTimeMillis() - config.startTime;
                     config.victoryTimer = 200;
                     changed = true;
@@ -101,7 +103,6 @@ public class GSRSplitManager {
             config.lastSplitTime = server.getOverworld().getTime();
             String formatted = GSRFormatUtil.formatTime(splitTicks);
 
-            // Output to tell the user something happened (Broadcast)
             server.getPlayerManager().broadcast(
                     Text.literal("§6§l[GSR] Split: §b" + type.toUpperCase() + " §fat §e" + formatted),
                     false

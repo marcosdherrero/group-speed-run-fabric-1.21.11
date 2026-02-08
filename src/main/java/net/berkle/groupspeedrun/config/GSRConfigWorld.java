@@ -69,9 +69,14 @@ public class GSRConfigWorld {
     /**
      * Calculates current run time, accounting for pauses.
      */
+    /**
+     * Calculates current run time, accounting for pauses, failures, and victories.
+     */
     public long getElapsedTime() {
         if (startTime <= 0) return 0;
-        if (isTimerFrozen) return frozenTime;
+        // If these are true, return the snapshot, not the live clock!
+        if (isTimerFrozen || isFailed || isVictorious) return frozenTime;
+
         return System.currentTimeMillis() - startTime;
     }
 
