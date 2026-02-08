@@ -55,22 +55,22 @@
 ## 📊 Fun Awards & Stat Tracking
 GSR looks at how everyone played and hands out "Awards" at the end. Our **Unique Pass** system tries to make sure as many friends as possible get a shout-out!
 
-| Stat Tag | Award Label | Description | Context |
-| :--- | :--- | :--- | :--- |
-| `dragon_warrior` | **§5🐉 Dragon Warrior** | Most damage dealt to the Ender Dragon. | Victory |
-| `adc` | **§6🏹 ADC** | Highest total damage dealt to mobs. | Both |
-| `killer` | **§4💀 Serial Killer** | Total number of mobs killed. | Both |
-| `tank` | **§4❈ Tank** | Most damage taken. | Both |
-| `defender` | **§b🛡 Defender** | Highest armor rating reached. | Both |
-| `healer` | **§d❤ Healer** | Most health points regenerated. | Both |
-| `brew_master` | **§b🧪 Brew Master** | Most potions consumed. | Both |
-| `pog_champ` | **§e🔥 Pog Champ** | Most high-value actions (Blaze Rods). | Both |
-| `builder` | **§2🔨 Builder** | Most blocks placed and broken combined. | Both |
-| `sightseer` | **§f👣 Sightseer** | Longest distance traveled (Blocks). | Both |
-| `shuffler` | **§3🗃 Shuffler** | Most time spent in inventories/chests. | Failure |
-| `coward` | **§e🏃 Coward** | Took the least damage (Failure Roasting). | Failure |
-| `weakling` | **§f🍼 Weakling** | Dealt the least damage (Failure Roasting). | Failure |
-| `good_for_nothing` | **§8⚖ Carried** | Player with the fewest advancements. | Failure |
+| Stat Tag | Award Label | Description                                      | Context |
+| :--- | :--- |:-------------------------------------------------| :--- |
+| `dragon_warrior` | **§5🐉 Dragon Warrior** | Most damage dealt to the Ender Dragon.           | Victory |
+| `adc` | **§6🏹 ADC** | Highest total damage dealt to mobs.              | Both |
+| `killer` | **§4💀 Serial Killer** | Total number of mobs killed.                     | Both |
+| `tank` | **§4❈ Tank** | Most damage taken.                               | Both |
+| `defender` | **§b🛡 Defender** | Highest armor rating reached.                    | Both |
+| `healer` | **§d❤ Healer** | Most health points regenerated.                  | Both |
+| `brew_master` | **§b🧪 Brew Master** | Most potions consumed.                           | Both |
+| `pog_champ` | **§e🔥 Pog Champ** | Most Blaze Rods collected after killing a blaze. | Both |
+| `builder` | **§2🔨 Builder** | Most blocks placed and broken combined.          | Both |
+| `sightseer` | **§f👣 Sightseer** | Longest distance traveled (Blocks).              | Both |
+| `shuffler` | **§3🗃 Shuffler** | Most chests opened.                              | Failure |
+| `coward` | **§e🏃 Coward** | Took the least damage (Failure Roasting).        | Failure |
+| `weakling` | **§f🍼 Weakling** | Dealt the least damage (Failure Roasting).       | Failure |
+| `good_for_nothing` | **§8⚖ Carried** | Player with the fewest advancements.             | Failure |
 
 
 ---
