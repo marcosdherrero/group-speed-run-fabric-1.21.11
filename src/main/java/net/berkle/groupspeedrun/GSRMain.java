@@ -49,7 +49,7 @@ public class GSRMain implements ModInitializer {
 
 			// Resume Time Calculation (Safe, doesn't use world object)
 			if (CONFIG.startTime != -1) {
-				if (!CONFIG.isTimerFrozen && !CONFIG.wasVictorious && !CONFIG.isFailed) {
+				if (!CONFIG.isTimerFrozen && !CONFIG.isVictorious && !CONFIG.isFailed) {
 					CONFIG.startTime = System.currentTimeMillis() - CONFIG.frozenTime;
 					LOGGER.info("[GSR] Active run detected: Resuming timer.");
 				}
@@ -64,7 +64,7 @@ public class GSRMain implements ModInitializer {
 		// 5. SERVER STARTED LOGIC (Part B: HUD & World Interaction)
 		// This fires AFTER the overworld is loaded, preventing the NullPointerException
 		ServerLifecycleEvents.SERVER_STARTED.register(server -> {
-			if (CONFIG.startTime != -1 && !CONFIG.isTimerFrozen && !CONFIG.wasVictorious && !CONFIG.isFailed) {
+			if (CONFIG.startTime != -1 && !CONFIG.isTimerFrozen && !CONFIG.isVictorious && !CONFIG.isFailed) {
 				// Now it is safe to call getOverworld()
 				if (server.getOverworld() != null) {
 					CONFIG.lastSplitTime = server.getOverworld().getTime();

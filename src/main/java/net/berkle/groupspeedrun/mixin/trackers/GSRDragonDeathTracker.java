@@ -5,7 +5,6 @@ import net.berkle.groupspeedrun.managers.GSRRunHistoryManager;
 import net.berkle.groupspeedrun.managers.GSRSplitManager;
 import net.minecraft.entity.boss.dragon.EnderDragonEntity;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.world.ServerWorld;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -26,7 +25,7 @@ public abstract class GSRDragonDeathTracker {
         if (dragon.getEntityWorld().isClient() || GSRMain.CONFIG == null) return;
 
         // Logic check: health must be zero, and we must not have already ended the run
-        if (dragon.getHealth() <= 0.0f && !GSRMain.CONFIG.wasVictorious && !GSRMain.CONFIG.isFailed) {
+        if (dragon.getHealth() <= 0.0f && !GSRMain.CONFIG.isVictorious && !GSRMain.CONFIG.isFailed) {
             MinecraftServer server = dragon.getEntityWorld().getServer();
             if (server != null) {
                 triggerVictory(server);

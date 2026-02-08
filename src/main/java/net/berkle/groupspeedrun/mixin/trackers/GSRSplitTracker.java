@@ -37,7 +37,7 @@ public abstract class GSRSplitTracker {
                 case "story/enter_the_nether" -> GSRSplitManager.completeSplit(server, "nether");
                 case "story/enter_the_end"    -> GSRSplitManager.completeSplit(server, "end");
 
-                /* * NOTE: Bastion and Fortress are better handled in GSRPlayerTracker
+                /* * NOTE: Bastion and Fortress are better handled in GSRServerPlayerEntityTracker
                  * via structure bounding-box checks to ensure the split triggers
                  * the exact second they step foot inside, rather than waiting for
                  * the advancement toast to appear.

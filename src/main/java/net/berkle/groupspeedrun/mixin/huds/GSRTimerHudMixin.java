@@ -40,7 +40,7 @@ public class GSRTimerHudMixin {
         // --- 2. ALPHA & VISIBILITY LOGIC ---
         // Note: We do NOT check hudMode or Tab-press here. We delegate that to the AlphaUtil.
         // This ensures the "Fade Out" animation can finish even after the user releases the Tab key.
-        boolean isFinished = worldConfig.wasVictorious || worldConfig.isFailed;
+        boolean isFinished = worldConfig.isVictorious || worldConfig.isFailed;
         long currentTime = client.world.getTime();
         long ticksSinceEnd = currentTime - worldConfig.lastSplitTime;
 
@@ -55,8 +55,8 @@ public class GSRTimerHudMixin {
         long displayTicks = worldConfig.getElapsedTime() / 50;
 
         // Dynamic Header Strings
-        String titleLabel = worldConfig.wasVictorious ? "§a§lGSR VICTORY!" : (worldConfig.isFailed ? "§c§lGSR FAIL" : "§6§lGSR Time:");
-        String timeColor = worldConfig.wasVictorious ? "§a" : (worldConfig.isFailed ? "§c" : "§f");
+        String titleLabel = worldConfig.isVictorious ? "§a§lGSR VICTORY!" : (worldConfig.isFailed ? "§c§lGSR FAIL" : "§6§lGSR Time:");
+        String timeColor = worldConfig.isVictorious ? "§a" : (worldConfig.isFailed ? "§c" : "§f");
         String pauseTag = worldConfig.isTimerFrozen && !isFinished ? " §7[PAUSED]" : "";
         String titleTime = timeColor + GSRFormatUtil.formatTime(displayTicks) + pauseTag;
 
@@ -136,14 +136,16 @@ public class GSRTimerHudMixin {
         context.getMatrices().popMatrix();
     }
 
-    /**
-     * Helper to format a single line of the split list.
-     * Includes logic for "Not Started" icons (○) vs "Completed" checkmarks (✔).
-     */
     @Unique
     private String[] prepareLine(String name, long ticks, long latest) {
-        if (ticks <= 0) return new String[]{"§7○ " + name, "§7--:--", ""};
-        String starIcon = (ticks == latest) ? "§6★ " : "";
-        return new String[]{"§a✔ " + name, "§f" + GSRFormatUtil.formatTime(ticks), starIcon};
+        // 1. Not Started State
+        if (ticks <= 0) {
+            return new String[]{"§7○ " + name, "§7--:--", ""};
+        }
+        // 2. Completed State: Decide between Star (Latest) or Checkmark (Finished)
+        String icon = (ticks == latest) ? "§6★ " : "§a✔ ";
+        // Return the name with the chosen icon and the time
+        // The third element is now empty because the icon is integrated into the first
+        return new String[]{icon + name, "§f" + GSRFormatUtil.formatTime(ticks), ""};
     }
 }

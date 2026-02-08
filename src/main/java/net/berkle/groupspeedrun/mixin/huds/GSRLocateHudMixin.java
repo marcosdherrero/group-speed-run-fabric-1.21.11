@@ -33,7 +33,7 @@ public class GSRLocateHudMixin {
         var pConfig = GSRConfigPlayer.INSTANCE;
 
         // --- FADE & VISIBILITY LOGIC ---
-        boolean isFinished = config.wasVictorious || config.isFailed;
+        boolean isFinished = config.isVictorious || config.isFailed;
         long ticksSinceEnd = client.world.getTime() - config.frozenTime;
         float fadeAlpha = GSRAlphaUtil.getFadeAlpha(client, config, isFinished, ticksSinceEnd);
 
@@ -140,20 +140,32 @@ public class GSRLocateHudMixin {
         float iconX = (float) centerX + xOffset;
         float iconY = (float) y + (8.5f * hudScale);
 
-        context.getMatrices().pushMatrix();
+        // 1. Render the Background Box (Fixed Size)
+        context.getMatrices().pushMatrix(); // Note: pushMatrix() in older Yarn, push() in newer 1.21
         context.getMatrices().translate(iconX, iconY);
         context.getMatrices().scale(hudScale, hudScale);
         context.fill(-9, -9, 9, 9, GSRColorHelper.applyAlpha(themeColor, alpha));
         context.fill(-8, -8, 8, 8, GSRColorHelper.applyAlpha(0x000000, 0.25f * alpha));
         context.getMatrices().popMatrix();
 
+// 2. Calculate Item Scale with Safety Clamp
         float distFactor = MathHelper.clamp((float) (1.0 - (distance / (double)pConfig.maxScaleDistance)), 0.0f, 1.0f);
-        float finalIconScale = MathHelper.lerp(distFactor, pConfig.MIN_ICON_SCALE, pConfig.MAX_ICON_SCALE) * hudScale;
 
+// Determine the distance-based scale
+        float rawScale = MathHelper.lerp(distFactor, pConfig.MIN_ICON_SCALE, pConfig.MAX_ICON_SCALE);
+
+// CRITICAL: Ensure the item (16px) never exceeds the inner box (16px)
+// A scale of 1.0f here means the item is exactly 16x16.
+        float cappedScale = Math.min(rawScale, 1.0f);
+
+// Apply the global HUD scale to the capped item scale
+        float finalIconScale = cappedScale * hudScale;
+
+// 3. Render the Item
         context.getMatrices().pushMatrix();
         context.getMatrices().translate(iconX, iconY);
         context.getMatrices().scale(finalIconScale, finalIconScale);
-        context.getMatrices().translate(-8.0f, -8.0f);
+        context.getMatrices().translate(-8.0f, -8.0f); // Center the 16x16 item
         context.drawItem(stack, 0, 0);
         context.getMatrices().popMatrix();
     }

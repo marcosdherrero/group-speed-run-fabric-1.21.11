@@ -2,6 +2,7 @@ package net.berkle.groupspeedrun.managers;
 
 import com.google.gson.JsonObject;
 import net.berkle.groupspeedrun.GSREvents;
+import net.berkle.groupspeedrun.GSRMain;
 import net.berkle.groupspeedrun.util.GSRFormatUtil;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.PlayerManager;
@@ -54,7 +55,9 @@ public class GSRBroadcastManager {
         }
 
         // Changed label from "Final Time" to "Current Time" for the command preview
-        String timeLabel = isFullList ? "§6Current Time: " : "§6Final Time: ";
+        String timeLabel = (GSRMain.CONFIG.isFailed || GSRMain.CONFIG.isVictorious)
+                ? "§6Final Time: "
+                : "§6Current Time: ";
         pm.broadcast(Text.literal(timeLabel + "§f" + GSRFormatUtil.formatTime(ticks)), false);
 
         // --- SECTION 1: PERFORMANCE ---

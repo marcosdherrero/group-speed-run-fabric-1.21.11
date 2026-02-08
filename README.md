@@ -97,9 +97,9 @@ GSR looks at how everyone played and hands out "Awards" at the end. Our **Unique
 
 | Setting | Type | Default | Options / Range | Location | Description |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| `hudMode` | int | `1` | `0`, `1`, `2` | Player | Sets when the timer is visible: Always, Tab-Only, or Hidden. |
-| `timerHudScale` | float | `1.0f` | `0.5` to `3.5` | Player | Size of the timer on the screen. |
-| `locateHudScale` | float | `0.95f` | `0.5` to `3.5` | Player | Size of the structure tracker bar. |
+| `hudMode` | int | `1` | `0` (Always), `1` (Tab), `2` (Hidden) | Player | Sets when the timer is visible on screen. |
+| `timerHudScale` | float | `1.0f` | `0.3` to `3.5` | Player | Size of the timer text. |
+| `locateHudScale` | float | `1.0f` | `0.3` to `3.5` | Player | Size of the structure tracker bar. |
 | `timerHudOnRight` | bool | `true` | `true` / `false` | Player | If false, timer moves to the left side. |
 | `locateHudOnTop` | bool | `true` | `true` / `false` | Player | If false, tracker moves to the bottom. |
 | `barWidth` | int | `100` | — | Player | Width of the structure locator bar. |

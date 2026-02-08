@@ -8,7 +8,7 @@
     "trackers.GSRDragonDeathTracker",
     "trackers.GSRItemEntityTracker",
     "trackers.GSRLivingEntityTracker",
-    "trackers.GSRPlayerTracker",
+    "trackers.GSRServerPlayerEntityTracker",
     "trackers.GSRServerPlayerInterTracker",
     "trackers.GSRSplitTracker",
     "accessors.BossBarHudAccessor",

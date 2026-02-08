@@ -3,8 +3,6 @@ package net.berkle.groupspeedrun;
 import net.berkle.groupspeedrun.config.GSRConfigWorld;
 import net.berkle.groupspeedrun.managers.GSRRunHistoryManager;
 import net.berkle.groupspeedrun.managers.GSRSplitManager;
-import net.minecraft.advancement.AdvancementProgress;
-import net.minecraft.advancement.PlayerAdvancementTracker;
 import net.minecraft.entity.attribute.EntityAttributeInstance;
 import net.minecraft.entity.attribute.EntityAttributes;
 import net.minecraft.entity.projectile.FireworkRocketEntity;
@@ -15,7 +13,6 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.sound.SoundEvents;
 import net.minecraft.text.Text;
-import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.GameMode;
 import java.util.List;
 
@@ -54,7 +51,7 @@ public class GSREvents {
         /*
          * 3. SHARED HEALTH ENGINE
          */
-        if (config.sharedHealthEnabled && !config.isFailed && !config.wasVictorious) {
+        if (config.sharedHealthEnabled && !config.isFailed && !config.isVictorious) {
             handleSharedHealth(server);
         }
 
@@ -68,7 +65,7 @@ public class GSREvents {
         /*
          * 5. VICTORY CELEBRATIONS
          */
-        if (config.wasVictorious && config.victoryTimer > 0) {
+        if (config.isVictorious && config.victoryTimer > 0) {
             if (config.victoryTimer % 10 == 0) {
                 for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) spawnFirework(p);
             }
@@ -155,7 +152,7 @@ public class GSREvents {
         }
 
         // 2. FAIL CONDITION (Group Death Logic)
-        if (config != null && config.startTime > 0 && config.groupDeathEnabled && !config.isFailed && !config.wasVictorious) {
+        if (config != null && config.startTime > 0 && config.groupDeathEnabled && !config.isFailed && !config.isVictorious) {
             config.isFailed = true;
             config.isTimerFrozen = true;
             config.frozenTime = System.currentTimeMillis() - config.startTime;

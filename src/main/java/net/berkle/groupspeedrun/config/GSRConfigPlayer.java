@@ -32,7 +32,7 @@ public class GSRConfigPlayer {
     public float locateHudScale = 0.95f;
 
     public final float MIN_ICON_SCALE = 0.5f;
-    public final float MAX_ICON_SCALE = 3.5f;
+    public final float MAX_ICON_SCALE = 1.0f;
     public final float MIN_LOCATE_SCALE = 0.5f;
     public final float MAX_LOCATE_SCALE = 3.5f;
 

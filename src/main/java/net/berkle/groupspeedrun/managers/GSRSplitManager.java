@@ -85,9 +85,9 @@ public class GSRSplitManager {
             case "fortress" -> { if (config.timeFortress <= 0) { config.timeFortress = splitTicks; changed = true; } }
             case "theend", "end" -> { if (config.timeEnd <= 0) { config.timeEnd = splitTicks; changed = true; } }
             case "dragon" -> {
-                if (!config.wasVictorious && !config.isFailed) {
+                if (!config.isVictorious && !config.isFailed) {
                     config.timeDragon = splitTicks;
-                    config.wasVictorious = true;
+                    config.isVictorious = true;
                     config.isTimerFrozen = true;
                     // Using real-world clock diff for the frozen anchor
                     config.frozenTime = System.currentTimeMillis() - config.startTime;

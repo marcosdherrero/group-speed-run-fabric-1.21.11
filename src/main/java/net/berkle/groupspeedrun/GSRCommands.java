@@ -5,7 +5,6 @@ import com.mojang.brigadier.arguments.FloatArgumentType;
 import com.mojang.brigadier.tree.LiteralCommandNode;
 import com.mojang.datafixers.util.Pair;
 import net.berkle.groupspeedrun.config.GSRConfigPlayer;
-import net.berkle.groupspeedrun.config.GSRConfigWorld;
 import net.berkle.groupspeedrun.managers.GSRBroadcastManager;
 import net.minecraft.advancement.AdvancementProgress;
 import net.minecraft.advancement.PlayerAdvancementTracker;
@@ -57,16 +56,26 @@ public class GSRCommands {
 
                 // --- BRANCH: RUN CONTROL ---
                 .then(literal("pause")
-                        .requires(source -> CommandManager.ADMINS_CHECK.allows(source.getPermissions()))
+                        .requires(source -> {
+                            var config = GSRMain.CONFIG;
+                            // Admin only, and only if the run is still in progress
+                            return CommandManager.ADMINS_CHECK.allows(source.getPermissions()) &&
+                                    (config != null && !config.isFailed && !config.isVictorious);
+                        })
                         .executes(context -> togglePause(context.getSource(), true)))
                 .then(literal("resume")
-                        .requires(source -> CommandManager.ADMINS_CHECK.allows(source.getPermissions()))
+                        .requires(source -> {
+                            var config = GSRMain.CONFIG;
+                            // Must be an admin AND the run must still be valid (not failed and not victorious)
+                            return CommandManager.ADMINS_CHECK.allows(source.getPermissions()) &&
+                                    (config != null && !config.isFailed && !config.isVictorious);
+                        })
                         .executes(context -> togglePause(context.getSource(), false)))
                 .then(literal("reset")
                         .requires(source -> {
                             var config = GSRMain.CONFIG;
                             return CommandManager.ADMINS_CHECK.allows(source.getPermissions()) ||
-                                    (config != null && (config.isFailed || config.wasVictorious));
+                                    (config != null && (config.isFailed || config.isVictorious));
                         })
                         .executes(context -> {
                             executeReset(context.getSource().getServer());
@@ -145,7 +154,7 @@ public class GSRCommands {
                         .requires(source -> {
                             var config = GSRMain.CONFIG;
                             return CommandManager.ADMINS_CHECK.allows(source.getPermissions()) ||
-                                    (config != null && (config.isFailed || config.wasVictorious));
+                                    (config != null && (config.isFailed || config.isVictorious));
                         })
                         .then(literal("fortress_toggle").executes(context -> toggleLocate(context.getSource(), "Fortress")))
                         .then(literal("bastion_toggle").executes(context -> toggleLocate(context.getSource(), "Bastion")))
@@ -156,7 +165,7 @@ public class GSRCommands {
                             context.getSource().sendFeedback(() -> Text.literal("§6[GSR] §aAll structure locators cleared."), false);
                             return 1;
                         })))
-        ); // <--- THIS SEMICOLON CLOSES THE dispatcher.register CALL
+        );
     }
 
     /**
@@ -245,6 +254,7 @@ public class GSRCommands {
         ServerWorld world = source.getWorld();
         var structureRegistry = world.getRegistryManager().getOrThrow(RegistryKeys.STRUCTURE);
 
+        // 1. Identify the structure key
         var structureKey = switch (type.toLowerCase()) {
             case "fortress" -> StructureKeys.FORTRESS;
             case "bastion" -> StructureKeys.BASTION_REMNANT;
@@ -256,24 +266,49 @@ public class GSRCommands {
         var structureEntry = structureRegistry.getOptional(structureKey);
         if (structureEntry.isPresent()) {
             RegistryEntryList<Structure> structureSet = RegistryEntryList.of(structureEntry.get());
+
+            // 2. Locate the nearest instance of that structure
             Pair<BlockPos, RegistryEntry<Structure>> result = world.getChunkManager().getChunkGenerator()
                     .locateStructure(world, structureSet, player.getBlockPos(), 100, false);
 
             if (result != null) {
                 BlockPos pos = result.getFirst();
                 var config = GSRMain.CONFIG;
+
+                // 3. SPECIAL LOGIC FOR END SHIPS (Verification)
+                if (type.equalsIgnoreCase("ship")) {
+                    var accessor = world.getStructureAccessor();
+
+                    // Get the specific structure start using the actual Structure object (not the key)
+                    var start = accessor.getStructureAt(pos, structureEntry.get().value());
+
+                    if (start != null && start.hasChildren()) {
+                        // Check pieces for "ship" identifier
+                        boolean hasShip = start.getChildren().stream()
+                                .anyMatch(piece -> piece.getType().toString().toLowerCase().contains("ship"));
+
+                        if (!hasShip) {
+                            source.sendError(Text.literal("§6[GSR] §cFound End City at " + pos.getX() + ", " + pos.getZ() + " but it has no Ship!"));
+                            return 0;
+                        }
+                    }
+                }
+
+                // 4. Save coordinates to config and activate HUD pin
                 switch (type.toLowerCase()) {
                     case "fortress" -> { config.fortressX = pos.getX(); config.fortressZ = pos.getZ(); config.fortressActive = true; }
                     case "bastion" -> { config.bastionX = pos.getX(); config.bastionZ = pos.getZ(); config.bastionActive = true; }
                     case "stronghold" -> { config.strongholdX = pos.getX(); config.strongholdZ = pos.getZ(); config.strongholdActive = true; }
                     case "ship" -> { config.shipX = pos.getX(); config.shipZ = pos.getZ(); config.shipActive = true; }
                 }
+
                 GSRMain.saveAndSync(source.getServer());
                 source.sendFeedback(() -> Text.literal("§6[GSR] " + type + " located at §f" + pos.getX() + ", " + pos.getZ() + " §a(HUD ON)"), false);
                 return 1;
             }
         }
-        source.sendError(Text.literal("Could not find " + type + " in this dimension."));
+
+        source.sendError(Text.literal("§6[GSR] §cCould not find " + type + " in this dimension."));
         return 0;
     }
 
@@ -305,7 +340,7 @@ public class GSRCommands {
         config.isTimerFrozen = false;
         config.frozenTime = 0;
         config.isFailed = false;
-        config.wasVictorious = false;
+        config.isVictorious = false;
         config.fortressActive = false;
         config.bastionActive = false;
         config.strongholdActive = false;
